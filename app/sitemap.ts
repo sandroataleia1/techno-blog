@@ -1,0 +1,2 @@
+import type {MetadataRoute} from "next"; import {site} from "@/lib/site"; import {publicProducts} from "@/lib/public-products";
+export const dynamic="force-dynamic"; export default function sitemap():MetadataRoute.Sitemap{const fixed=["","/melhores-fones-mercado-livre","/sobre","/privacidade","/cookies","/termos","/politica-editorial","/politica-de-correcoes","/divulgacao-afiliados"];return [...fixed.map(url=>({url:`${site.url}${url}`,lastModified:new Date("2026-08-09")})),...publicProducts().map(p=>({url:`${site.url}/fones/${p.slug}`,lastModified:new Date(p.updatedAt)}))]}

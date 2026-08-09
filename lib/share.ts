@@ -1,0 +1,1 @@
+export const shareTexts={whatsapp:"Confira este guia para comparar fones de ouvido antes de comprar.",instagram:"Um comparativo claro para encontrar o fone ideal.",facebook:"Veja o ranking de fones e compare os perfis de uso.",pinterest:"Ideias para escolher seu próximo fone de ouvido.",telegram:"Ranking atualizado de fones de ouvido para comparar."};

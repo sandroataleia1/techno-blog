@@ -1,0 +1,12 @@
+node_modules
+.next
+data/*.sqlite
+data/*.sqlite-*
+data/backups
+data/uploads
+.env
+.env.production
+.env.local
+*.tmp
+*.temp
+*.log

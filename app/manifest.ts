@@ -1,0 +1,1 @@
+import type {MetadataRoute} from "next"; export default function manifest():MetadataRoute.Manifest{return {name:"Guia do Fone",short_name:"Guia do Fone",description:"Comparativos editoriais de fones de ouvido.",start_url:"/",display:"browser",background_color:"#fbfdfd",theme_color:"#07556a",lang:"pt-BR",icons:[{src:"/icon",sizes:"any",type:"image/png"}]}}

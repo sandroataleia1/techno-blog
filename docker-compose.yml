@@ -1,0 +1,15 @@
+services:
+  guia-do-fone:
+    build: .
+    ports: ["${HOST_PORT:-3002}:3000"]
+    env_file:
+      - path: .env.local
+        required: false
+    environment:
+      DATABASE_PATH: /app/data/guia-do-fone.sqlite
+    volumes:
+      - guia-do-fone-data:/app/data
+    restart: unless-stopped
+volumes:
+  guia-do-fone-data:
+    name: guia-do-fone-data
