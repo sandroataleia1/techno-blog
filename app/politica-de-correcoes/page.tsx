@@ -1,3 +1,3 @@
-import type {Metadata} from "next"; import {Footer,Header} from "@/components";
-export const metadata:Metadata={title:"Política de Correções",description:"Como o Guia do Fone corrige informações editoriais relevantes.",alternates:{canonical:"/politica-de-correcoes"}};
+import type {Metadata} from "next"; import {Footer,Header} from "@/components"; import {site} from "@/lib/site";
+export const metadata:Metadata={title:"Política de Correções",description:`Como o ${site.name} corrige informações editoriais relevantes.`,alternates:{canonical:"/politica-de-correcoes"}};
 export default function Corrections(){return <><Header/><main id="conteudo" className="article"><div className="shell"><p className="breadcrumbs">Início / Política de Correções</p><h1>Política de Correções</h1><div className="card"><p>Quando uma informação editorial relevante estiver desatualizada ou incorreta, ela será corrigida e a página terá sua data de revisão atualizada. Correções não devem criar uma aparência artificial de atualização constante.</p></div></div></main><Footer/></>}
