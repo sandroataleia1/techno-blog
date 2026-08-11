@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/support/alias-hooks.mjs --test tests/*.test.mjs",
+    "test": "node --conditions=react-server --experimental-strip-types --experimental-loader=./tests/support/alias-hooks.mjs --test --test-concurrency=1 tests/*.test.mjs",
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:seed": "node scripts/db-migrate.mjs"
   },
