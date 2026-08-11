@@ -379,6 +379,13 @@ h2 { font-size: clamp(1.6rem, 2.6vw, 2.4rem); }
 .admin-source-item a { color: var(--primary); text-decoration: underline; word-break: break-all; }
 .admin-source-meta { display: flex; gap: 0.8rem; flex-wrap: wrap; font-size: 0.78rem; color: var(--metal-2); margin-top: 0.4rem; }
 
+.admin-ranking-item { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 0.9rem 1rem; margin-bottom: 0.8rem; }
+.admin-ranking-item-head { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 0.8rem; }
+.admin-ranking-position { display: inline-flex; align-items: center; justify-content: center; width: 1.8rem; height: 1.8rem; border-radius: 50%; background: var(--accent-tint); color: var(--primary); font-weight: 800; font-size: 0.85rem; flex-shrink: 0; }
+.admin-ranking-item-head strong { flex: 1; font-size: 0.95rem; }
+.admin-ranking-item-actions { display: flex; gap: 0.4rem; }
+.admin-ranking-item-actions .cta { padding: 0.35rem 0.7rem; font-size: 0.8rem; min-height: 0; }
+
 @media (max-width: 860px) {
   .admin-shell { flex-direction: column; }
   .admin-sidebar { width: 100%; height: auto; position: relative; flex-direction: row; align-items: center; overflow-x: auto; }

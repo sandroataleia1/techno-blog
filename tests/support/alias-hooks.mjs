@@ -21,5 +21,21 @@ export async function resolve(specifier, context, nextResolve) {
     const target = new URL(`${specifier.slice(2)}.ts`, root).href;
     return nextResolve(target, context);
   }
+  // Next.js subpath imports like "next/headers" resolve fine under Next's
+  // own bundler (webpack/turbopack auto-append extensions when resolving),
+  // but the `next` package declares no "exports" map, so plain Node's ESM
+  // resolver — which never guesses an extension for a bare specifier —
+  // fails with ERR_MODULE_NOT_FOUND and suggests the real file:
+  // node_modules/next/headers.js. Retry with ".js" appended only when the
+  // first attempt fails this specific way, so any "next/*" specifier that
+  // already resolves on its own is left alone.
+  if (specifier.startsWith("next/") && !specifier.endsWith(".js")) {
+    try {
+      return await nextResolve(specifier, context);
+    } catch (e) {
+      if (e?.code === "ERR_MODULE_NOT_FOUND") return nextResolve(`${specifier}.js`, context);
+      throw e;
+    }
+  }
   return nextResolve(specifier, context);
 }

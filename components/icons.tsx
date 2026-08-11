@@ -220,6 +220,16 @@ export function IconArchive(props: IconProps) {
   );
 }
 
+export function IconPodium(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M3.5 19.5v-6h5.5v6" />
+      <path d="M9 19.5V4.5h6v15" />
+      <path d="M15 19.5v-9h5.5v9" />
+    </svg>
+  );
+}
+
 export function IconExternal(props: IconProps) {
   return (
     <svg {...base} {...props}>
