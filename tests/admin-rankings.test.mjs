@@ -8,12 +8,14 @@ import {
   isValidSlug,
   MAX_DRAFT_ITEMS,
   RANKING_STATUSES,
+  RankingValidationError,
   REQUIRED_PUBLISHED_ITEMS,
   validateDraftItems,
   validateEditorialForPublish,
   validateItemsForPublish,
 } from '../lib/rankings-rules.ts';
 import {sameOrigin} from '../lib/admin.ts';
+import {translateRankingError, validateRankingBody} from '../app/api/admin/rankings/route.ts';
 
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
 
@@ -103,6 +105,91 @@ test('CSRF: sameOrigin aceita requisição same-origin e sem header Origin, reje
   assert.equal(sameOrigin(sameOriginReq), true);
   assert.equal(sameOrigin(noOriginReq), true);
   assert.equal(sameOrigin(crossOriginReq), false);
+});
+
+// ---------- Behavioral: centralized error translation (real logic — translateRankingError/validateRankingBody are pure) ----------
+// Every response an admin can see for a rankings request is decided by
+// translateRankingError() — this exercises the real function directly
+// against the exact kinds of errors it has to handle, including ones that
+// can never legitimately occur through a live HTTP request against this
+// app (a bare TypeError, a random unrecognized Error, a thrown non-Error
+// value) precisely because no valid input can trigger them: everything
+// reachable through the API is pre-validated into a RankingValidationError
+// first. Testing the "unexpected error" branch this way — calling the real
+// translator with a real unexpected error object — is the strongest
+// available proof that a bug or a future unguarded throw degrades to a
+// safe generic response instead of leaking; the HTTP suite
+// (tests/admin-rankings-http.test.mjs) exercises the branches an attacker
+// can actually reach: no session, wrong Origin, and a malformed body.
+
+test('validateRankingBody: corpo nulo, array, string ou número é rejeitado como "Corpo da requisição inválido.", nunca um TypeError bruto', () => {
+  for (const badBody of [null, [], ['x'], 'a string', 42, true]) {
+    assert.throws(() => validateRankingBody(badBody), (err) => {
+      assert.ok(err instanceof RankingValidationError, 'deve lançar RankingValidationError, não um TypeError de acesso a propriedade');
+      assert.equal(err.message, 'Corpo da requisição inválido.');
+      return true;
+    });
+  }
+});
+
+test('translateRankingError: marcadores de autenticação nunca vazam como texto — 401/403 sempre com mensagem pública fixa', () => {
+  assert.deepEqual(translateRankingError(new Error('UNAUTHORIZED')), {status: 401, message: 'Não autorizado'});
+  assert.deepEqual(translateRankingError(new Error('FORBIDDEN')), {status: 403, message: 'Requisição proibida'});
+});
+
+test('translateRankingError: RankingValidationError com mensagem editorial específica vira 400 com essa mesma mensagem', () => {
+  const result = translateRankingError(new RankingValidationError('Título é obrigatório.'));
+  assert.deepEqual(result, {status: 400, message: 'Título é obrigatório.'});
+});
+
+test('translateRankingError: marcadores de slug (SLUG_TAKEN/SLUG_LOCKED) viram 409 com mensagem traduzida, nunca o marcador cru', () => {
+  const taken = translateRankingError(new RankingValidationError('SLUG_TAKEN'));
+  assert.equal(taken.status, 409);
+  assert.equal(taken.message, 'Já existe um ranking com este slug.');
+  assert.doesNotMatch(taken.message, /SLUG_TAKEN/);
+
+  const locked = translateRankingError(new RankingValidationError('SLUG_LOCKED'));
+  assert.equal(locked.status, 409);
+  assert.equal(locked.message, 'O slug não pode ser alterado depois da primeira publicação.');
+  assert.doesNotMatch(locked.message, /SLUG_LOCKED/);
+});
+
+test('translateRankingError: erro de integridade do SQLite (UNIQUE/FOREIGN KEY) é traduzido, nunca aparece SQL/SQLite na resposta', () => {
+  const unique = translateRankingError(new Error("UNIQUE constraint failed: rankings.slug"));
+  assert.equal(unique.status, 409);
+  assert.doesNotMatch(unique.message, /UNIQUE|SQL|SQLite|rankings\.slug/i);
+
+  const fk = translateRankingError(new Error("FOREIGN KEY constraint failed"));
+  assert.equal(fk.status, 409);
+  assert.doesNotMatch(fk.message, /FOREIGN KEY|SQL|SQLite/i);
+});
+
+test('translateRankingError: JSON malformado (SyntaxError) vira 400 "Corpo da requisição inválido."', () => {
+  let syntaxError;
+  try {
+    JSON.parse('{isso não é json');
+  } catch (e) {
+    syntaxError = e;
+  }
+  assert.ok(syntaxError instanceof SyntaxError);
+  assert.deepEqual(translateRankingError(syntaxError), {status: 400, message: 'Corpo da requisição inválido.'});
+});
+
+test('translateRankingError: qualquer erro inesperado (TypeError, Error genérico, valor não-Error) vira 500 genérico — nunca expõe a mensagem original', () => {
+  const cases = [
+    new TypeError("Cannot read properties of null (reading 'title')"),
+    new Error('database is locked'),
+    new Error('connect ECONNREFUSED 127.0.0.1:1234'),
+    'uma string lançada diretamente, não um Error',
+    undefined,
+  ];
+  for (const unexpected of cases) {
+    const result = translateRankingError(unexpected);
+    assert.deepEqual(result, {status: 500, message: 'Não foi possível concluir a operação.'});
+    if (unexpected instanceof Error) {
+      assert.doesNotMatch(result.message, new RegExp(unexpected.message.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    }
+  }
 });
 
 // ---------- Auxiliary structural checks ----------

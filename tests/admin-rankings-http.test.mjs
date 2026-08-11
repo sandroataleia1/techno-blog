@@ -1,4 +1,16 @@
-// Real HTTP behavioral tests for auth/CSRF on the rankings admin API.
+// Real HTTP behavioral tests for auth/CSRF/error-shape on the rankings
+// admin API: every 401 and 403 asserts both status and exact response
+// body (never the raw UNAUTHORIZED/FORBIDDEN control-flow marker), and a
+// null or malformed JSON body is confirmed to produce the same safe 400
+// rather than a leaked TypeError or JSON-parser message. The "unexpected
+// error -> 500" branch of translateRankingError() is instead covered by
+// tests/admin-rankings.test.mjs, which calls the real translator directly
+// with real unexpected error objects (TypeError, an unrecognized Error, a
+// thrown non-Error value) — those specific failures cannot legitimately be
+// triggered through a live HTTP request against this app, since every
+// reachable input path is pre-validated into a RankingValidationError
+// first; the routes never contain a deliberately-reachable "crash" branch
+// to demonstrate over HTTP, which is the point.
 //
 // Why this isn't just "import the route handler and call it": requireAdmin()
 // -> adminSession() calls cookies() from "next/headers", which reads Next's
@@ -130,12 +142,17 @@ test.after(async () => {
   }
 });
 
-test("GET /api/admin/rankings sem sessão -> 401", async () => {
+const UNAUTHORIZED_BODY = {error: "Não autorizado"};
+const FORBIDDEN_BODY = {error: "Requisição proibida"};
+const BAD_BODY_RESPONSE = {error: "Corpo da requisição inválido."};
+
+test("GET /api/admin/rankings sem sessão -> 401, corpo genérico", async () => {
   const res = await fetch(`${baseUrl}/api/admin/rankings`);
   assert.equal(res.status, 401);
+  assert.deepEqual(await res.json(), UNAUTHORIZED_BODY);
 });
 
-test("POST /api/admin/rankings sem sessão -> 401, e não altera o banco", async () => {
+test("POST /api/admin/rankings sem sessão -> 401, corpo genérico, e não altera o banco", async () => {
   const before = dbSnapshot();
   const res = await fetch(`${baseUrl}/api/admin/rankings`, {
     method: "POST",
@@ -143,15 +160,17 @@ test("POST /api/admin/rankings sem sessão -> 401, e não altera o banco", async
     body: JSON.stringify({title: "sem sessão", slug: "sem-sessao", categoryId, status: "draft", items: []}),
   });
   assert.equal(res.status, 401);
+  assert.deepEqual(await res.json(), UNAUTHORIZED_BODY);
   assert.deepEqual(dbSnapshot(), before);
 });
 
-test("GET /api/admin/rankings/[id] sem sessão -> 401", async () => {
+test("GET /api/admin/rankings/[id] sem sessão -> 401, corpo genérico", async () => {
   const res = await fetch(`${baseUrl}/api/admin/rankings/${sampleRankingId}`);
   assert.equal(res.status, 401);
+  assert.deepEqual(await res.json(), UNAUTHORIZED_BODY);
 });
 
-test("PATCH /api/admin/rankings/[id] sem sessão -> 401, e não altera o banco", async () => {
+test("PATCH /api/admin/rankings/[id] sem sessão -> 401, corpo genérico, e não altera o banco", async () => {
   const before = dbSnapshot();
   const res = await fetch(`${baseUrl}/api/admin/rankings/${sampleRankingId}`, {
     method: "PATCH",
@@ -159,17 +178,19 @@ test("PATCH /api/admin/rankings/[id] sem sessão -> 401, e não altera o banco",
     body: JSON.stringify({title: "hackeado sem sessão", slug: "http-test-ranking", categoryId, status: "draft", items: []}),
   });
   assert.equal(res.status, 401);
+  assert.deepEqual(await res.json(), UNAUTHORIZED_BODY);
   assert.deepEqual(dbSnapshot(), before);
 });
 
-test("DELETE /api/admin/rankings/[id] sem sessão -> 401, e não altera o banco", async () => {
+test("DELETE /api/admin/rankings/[id] sem sessão -> 401, corpo genérico, e não altera o banco", async () => {
   const before = dbSnapshot();
   const res = await fetch(`${baseUrl}/api/admin/rankings/${sampleRankingId}`, {method: "DELETE"});
   assert.equal(res.status, 401);
+  assert.deepEqual(await res.json(), UNAUTHORIZED_BODY);
   assert.deepEqual(dbSnapshot(), before);
 });
 
-test("POST autenticado com Origin inválido -> 403, e não altera o banco", async () => {
+test("POST autenticado com Origin inválido -> 403, corpo genérico, e não altera o banco", async () => {
   const before = dbSnapshot();
   const res = await fetch(`${baseUrl}/api/admin/rankings`, {
     method: "POST",
@@ -177,10 +198,11 @@ test("POST autenticado com Origin inválido -> 403, e não altera o banco", asyn
     body: JSON.stringify({title: "csrf create", slug: "csrf-create-attempt", categoryId, status: "draft", items: []}),
   });
   assert.equal(res.status, 403);
+  assert.deepEqual(await res.json(), FORBIDDEN_BODY);
   assert.deepEqual(dbSnapshot(), before);
 });
 
-test("PATCH autenticado com Origin inválido -> 403, e não altera o banco", async () => {
+test("PATCH autenticado com Origin inválido -> 403, corpo genérico, e não altera o banco", async () => {
   const before = dbSnapshot();
   const res = await fetch(`${baseUrl}/api/admin/rankings/${sampleRankingId}`, {
     method: "PATCH",
@@ -188,16 +210,74 @@ test("PATCH autenticado com Origin inválido -> 403, e não altera o banco", asy
     body: JSON.stringify({title: "csrf patch", slug: "http-test-ranking", categoryId, status: "draft", items: []}),
   });
   assert.equal(res.status, 403);
+  assert.deepEqual(await res.json(), FORBIDDEN_BODY);
   assert.deepEqual(dbSnapshot(), before);
 });
 
-test("DELETE autenticado com Origin inválido -> 403, e não altera o banco", async () => {
+test("DELETE autenticado com Origin inválido -> 403, corpo genérico, e não altera o banco", async () => {
   const before = dbSnapshot();
   const res = await fetch(`${baseUrl}/api/admin/rankings/${sampleRankingId}`, {
     method: "DELETE",
     headers: {cookie: sessionCookie, origin: "https://evil.example"},
   });
   assert.equal(res.status, 403);
+  assert.deepEqual(await res.json(), FORBIDDEN_BODY);
+  assert.deepEqual(dbSnapshot(), before);
+});
+
+test("POST autenticado com corpo JSON null -> 400, não um TypeError, e não altera o banco", async () => {
+  const before = dbSnapshot();
+  const res = await fetch(`${baseUrl}/api/admin/rankings`, {
+    method: "POST",
+    headers: {"content-type": "application/json", cookie: sessionCookie, origin: baseUrl},
+    body: "null",
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.deepEqual(body, BAD_BODY_RESPONSE);
+  assert.doesNotMatch(body.error, /TypeError|Cannot read propert/i);
+  assert.deepEqual(dbSnapshot(), before);
+});
+
+test("PATCH autenticado com corpo JSON null -> 400, não um TypeError, e não altera o banco", async () => {
+  const before = dbSnapshot();
+  const res = await fetch(`${baseUrl}/api/admin/rankings/${sampleRankingId}`, {
+    method: "PATCH",
+    headers: {"content-type": "application/json", cookie: sessionCookie, origin: baseUrl},
+    body: "null",
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.deepEqual(body, BAD_BODY_RESPONSE);
+  assert.doesNotMatch(body.error, /TypeError|Cannot read propert/i);
+  assert.deepEqual(dbSnapshot(), before);
+});
+
+test("POST autenticado com JSON malformado -> 400, nunca a mensagem crua do parser", async () => {
+  const before = dbSnapshot();
+  const res = await fetch(`${baseUrl}/api/admin/rankings`, {
+    method: "POST",
+    headers: {"content-type": "application/json", cookie: sessionCookie, origin: baseUrl},
+    body: "{isso não é json",
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.deepEqual(body, BAD_BODY_RESPONSE);
+  assert.doesNotMatch(body.error, /JSON|Unexpected token|position/i);
+  assert.deepEqual(dbSnapshot(), before);
+});
+
+test("PATCH autenticado com JSON malformado -> 400, nunca a mensagem crua do parser", async () => {
+  const before = dbSnapshot();
+  const res = await fetch(`${baseUrl}/api/admin/rankings/${sampleRankingId}`, {
+    method: "PATCH",
+    headers: {"content-type": "application/json", cookie: sessionCookie, origin: baseUrl},
+    body: "{isso não é json",
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.deepEqual(body, BAD_BODY_RESPONSE);
+  assert.doesNotMatch(body.error, /JSON|Unexpected token|position/i);
   assert.deepEqual(dbSnapshot(), before);
 });
 

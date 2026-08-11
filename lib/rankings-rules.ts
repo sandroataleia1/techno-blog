@@ -6,6 +6,18 @@
 export const RANKING_STATUSES = ["draft", "published", "archived"] as const;
 export type RankingStatus = (typeof RANKING_STATUSES)[number];
 
+// Tags an error as "deliberately thrown with a message written to be shown
+// to the admin verbatim" — every throw site in lib/rankings.ts and the
+// request-body validation in app/api/admin/rankings/route.ts that
+// represents a known, intentional rejection (bad input, a business rule,
+// a slug conflict marker) uses this class instead of a plain Error.
+// Anything that reaches a route's catch block WITHOUT this type — a
+// TypeError, a JSON SyntaxError, a raw SQLite error, a genuine bug — is
+// treated as unexpected and never has its .message shown to the client.
+// See translateRankingError() in app/api/admin/rankings/route.ts, the only
+// place that turns any of this into an HTTP response.
+export class RankingValidationError extends Error {}
+
 export const REQUIRED_PUBLISHED_ITEMS = 10;
 export const MAX_DRAFT_ITEMS = 10;
 

@@ -4,6 +4,7 @@ import {db} from "@/lib/db";
 import {
   assignPositions,
   isValidSlug,
+  RankingValidationError,
   validateDraftItems,
   validateEditorialForPublish,
   validateItemsForPublish,
@@ -67,13 +68,13 @@ export type RankingInput = {
 
 function assertSlugAvailable(slug: string, exceptId?: string) {
   const row = db().prepare("SELECT id FROM rankings WHERE slug=?").get(slug) as {id: string} | undefined;
-  if (row && row.id !== exceptId) throw new Error("SLUG_TAKEN");
+  if (row && row.id !== exceptId) throw new RankingValidationError("SLUG_TAKEN");
 }
 
 function assertCategoryActive(categoryId: string | null) {
-  if (!categoryId) throw new Error("Selecione uma categoria válida.");
+  if (!categoryId) throw new RankingValidationError("Selecione uma categoria válida.");
   const cat = db().prepare("SELECT is_active FROM categories WHERE id=?").get(categoryId) as {is_active: number} | undefined;
-  if (!cat || !cat.is_active) throw new Error("A categoria selecionada não existe ou está inativa.");
+  if (!cat || !cat.is_active) throw new RankingValidationError("A categoria selecionada não existe ou está inativa.");
 }
 
 // Publish-only DB-bound checks: existence/active/published/not-deleted can't
@@ -89,18 +90,18 @@ function assertProductsPublishable(items: RankingItemInput[]) {
   const byId = new Map(rows.map((r) => [r.id, r]));
   for (const productId of ids) {
     const p = byId.get(productId);
-    if (!p) throw new Error("Um dos produtos selecionados não existe mais.");
-    if (p.deleted_at) throw new Error("Um dos produtos selecionados foi excluído.");
-    if (!p.is_active) throw new Error("Um dos produtos selecionados está inativo.");
-    if (p.status !== "published") throw new Error("Um dos produtos selecionados não está com status publicado.");
+    if (!p) throw new RankingValidationError("Um dos produtos selecionados não existe mais.");
+    if (p.deleted_at) throw new RankingValidationError("Um dos produtos selecionados foi excluído.");
+    if (!p.is_active) throw new RankingValidationError("Um dos produtos selecionados está inativo.");
+    if (p.status !== "published") throw new RankingValidationError("Um dos produtos selecionados não está com status publicado.");
   }
 }
 
 function assertPublishable(input: Pick<RankingInput, "items" | "description" | "methodology">) {
   const itemsError = validateItemsForPublish(input.items);
-  if (itemsError) throw new Error(itemsError);
+  if (itemsError) throw new RankingValidationError(itemsError);
   const editorialError = validateEditorialForPublish(input);
-  if (editorialError) throw new Error(editorialError);
+  if (editorialError) throw new RankingValidationError(editorialError);
   assertProductsPublishable(input.items);
 }
 
@@ -122,11 +123,11 @@ function writeItems(conn: ReturnType<typeof db>, rankingId: string, items: Ranki
 }
 
 export function createRanking(input: RankingInput): DbRanking {
-  if (!input.title?.trim()) throw new Error("Título é obrigatório.");
-  if (!isValidSlug(input.slug)) throw new Error("Slug inválido — use letras minúsculas, números e hífens.");
+  if (!input.title?.trim()) throw new RankingValidationError("Título é obrigatório.");
+  if (!isValidSlug(input.slug)) throw new RankingValidationError("Slug inválido — use letras minúsculas, números e hífens.");
   assertCategoryActive(input.categoryId);
   const itemsError = validateDraftItems(input.items);
-  if (itemsError) throw new Error(itemsError);
+  if (itemsError) throw new RankingValidationError(itemsError);
   if (input.status === "published") assertPublishable(input);
   assertSlugAvailable(input.slug);
 
@@ -146,15 +147,15 @@ export function createRanking(input: RankingInput): DbRanking {
 export function updateRanking(id: string, input: RankingInput): DbRanking | undefined {
   const existing = rankingById(id);
   if (!existing) return undefined;
-  if (!input.title?.trim()) throw new Error("Título é obrigatório.");
-  if (!isValidSlug(input.slug)) throw new Error("Slug inválido — use letras minúsculas, números e hífens.");
+  if (!input.title?.trim()) throw new RankingValidationError("Título é obrigatório.");
+  if (!isValidSlug(input.slug)) throw new RankingValidationError("Slug inválido — use letras minúsculas, números e hífens.");
   // Slug lock: once a ranking has ever been published (published_at set),
   // its slug is permanently frozen — even if it's later archived — so a
   // future public page never has to worry about a stale/broken URL.
-  if (existing.published_at && input.slug !== existing.slug) throw new Error("SLUG_LOCKED");
+  if (existing.published_at && input.slug !== existing.slug) throw new RankingValidationError("SLUG_LOCKED");
   assertCategoryActive(input.categoryId);
   const itemsError = validateDraftItems(input.items);
-  if (itemsError) throw new Error(itemsError);
+  if (itemsError) throw new RankingValidationError(itemsError);
   if (input.status === "published") assertPublishable(input);
   assertSlugAvailable(input.slug, id);
 
