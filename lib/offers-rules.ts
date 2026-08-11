@@ -116,3 +116,23 @@ export function resolvePrimaryFlag(requestedPrimary: boolean, status: OfferStatu
 export function publicPrice(cents: number | null, lastCheckedAt: string | null): number | null {
   return lastCheckedAt ? cents : null;
 }
+
+// The struck-through "previous price" only makes sense to show as a
+// discount signal — if it isn't actually higher than the current price,
+// showing it would be misleading (or just noise), so it's hidden rather
+// than shown as if it were meaningful. Deliberately not a percentage: the
+// task is "show it was cheaper before", not "claim a specific discount".
+export function shouldShowPreviousPrice(currentCents: number | null, previousCents: number | null): boolean {
+  return currentCents !== null && previousCents !== null && previousCents > currentCents;
+}
+
+// Formats integer cents as Brazilian currency for display. The division by
+// 100 here is display-only — Intl.NumberFormat's internal rounding
+// operates on the resulting float exactly like showing "R$ 219,90" from
+// the number 219.9 always has (this is not the "parseFloat(text) * 100"
+// class of bug the storage layer avoids; that bug is about *deriving* a
+// cents integer from user-typed text, not about *displaying* one).
+const brl = new Intl.NumberFormat("pt-BR", {style: "currency", currency: "BRL"});
+export function formatCentsToBRL(cents: number): string {
+  return brl.format(cents / 100);
+}

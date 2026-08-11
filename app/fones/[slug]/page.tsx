@@ -4,12 +4,11 @@ import Link from "next/link";
 import {Footer, Header, Offer, ProductMedia, QuickFacts} from "@/components";
 import {IconBattery, IconCheck, IconDrop, IconFlag, IconLink, IconShield, IconType, IconWave} from "@/components/icons";
 import {productBySlug} from "@/lib/db";
-import {publicProducts} from "@/lib/public-products";
-import type {Product} from "@/lib/products";
+import {publicProducts, type PublicProduct} from "@/lib/public-products";
 
 const USE_LABELS: Record<string, string> = {academia: "Academia", trabalho: "Trabalho", viagem: "Viagem", cotidiano: "Cotidiano"};
 
-function buildFaq(p: Product) {
+function buildFaq(p: PublicProduct) {
   return [
     {q: `O ${p.name} é TWS ou headphone?`, a: `Segundo a ficha do produto, o ${p.name} é do tipo ${p.type}.`},
     {q: `O ${p.name} tem cancelamento de ruído (ANC)?`, a: p.anc === "Sim" ? "Sim, o ANC está confirmado nas especificações deste modelo." : `As especificações confirmadas indicam “${p.anc}” para ANC neste modelo.`},

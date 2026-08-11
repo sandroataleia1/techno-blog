@@ -2,7 +2,8 @@
 import Link from "next/link";
 import {useMemo, useState} from "react";
 import {externalProps, site} from "@/lib/site";
-import type {Product} from "@/lib/products";
+import type {PublicProduct} from "@/lib/public-products";
+import {formatCentsToBRL, shouldShowPreviousPrice} from "@/lib/offers-rules";
 import {LogoMark, Wordmark, WaveMotif} from "@/components/brand";
 import {
   IconArrowRight,
@@ -104,17 +105,39 @@ export function Disclosure() {
 
 // ---------- Buttons ----------
 
-export function Offer({p, label = "Ver oferta no Mercado Livre"}: {p: Product; label?: string}) {
+const checkedDate = new Intl.DateTimeFormat("pt-BR", {dateStyle: "short"});
+
+// The affiliate link and its price, if any, come exclusively from
+// affiliate_offers (MVP-1) via p.offer — never from the legacy
+// products.affiliate_url. When there's no active primary offer, the
+// product and its editorial content stay visible (the caller renders this
+// in place of a link, not instead of the whole card) — no empty or made-up
+// href is ever generated.
+export function Offer({p, label = "Ver oferta no Mercado Livre"}: {p: PublicProduct; label?: string}) {
+  const offer = p.offer;
+  if (!offer) {
+    return <p className="offer-unavailable">Oferta indisponível no momento</p>;
+  }
+  const showPrevious = shouldShowPreviousPrice(offer.currentPriceCents, offer.previousPriceCents);
   return (
-    <a className="cta ml" href={p.affiliateUrl} {...externalProps} aria-label={`${label}: ${p.name}`} onClick={() => console.info("click_affiliate", p.id)}>
-      {label} ↗
-    </a>
+    <div className="offer-block">
+      {offer.currentPriceCents !== null && offer.lastCheckedAt && (
+        <p className="offer-price">
+          {showPrevious && <span className="offer-price-previous">{formatCentsToBRL(offer.previousPriceCents!)}</span>}
+          <span className="offer-price-current">{formatCentsToBRL(offer.currentPriceCents)}</span>
+          <span className="offer-price-date">Conferido em {checkedDate.format(new Date(offer.lastCheckedAt))}</span>
+        </p>
+      )}
+      <a className="cta ml" href={offer.affiliateUrl} {...externalProps} aria-label={`${label}: ${p.name}`} onClick={() => console.info("click_affiliate", p.id)}>
+        {label} ↗
+      </a>
+    </div>
   );
 }
 
 // ---------- Product media ----------
 
-export function ProductMedia({p, priority = false, className}: {p: Product; priority?: boolean; className?: string}) {
+export function ProductMedia({p, priority = false, className}: {p: PublicProduct; priority?: boolean; className?: string}) {
   return (
     <div className={`media-frame${className ? ` ${className}` : ""}`}>
       {p.image ? (
@@ -131,7 +154,7 @@ export function ProductMedia({p, priority = false, className}: {p: Product; prio
 
 // ---------- Quick facts ----------
 
-export function QuickFacts({p}: {p: Product}) {
+export function QuickFacts({p}: {p: PublicProduct}) {
   return (
     <ul className="quick-facts">
       <li><IconType /> {p.type}</li>
@@ -143,7 +166,7 @@ export function QuickFacts({p}: {p: Product}) {
 
 // ---------- Ranking: rich card (Top 3 / curated picks) ----------
 
-export function RankCard({p, rank = "pair"}: {p: Product; rank?: "lead" | "pair"}) {
+export function RankCard({p, rank = "pair"}: {p: PublicProduct; rank?: "lead" | "pair"}) {
   return (
     <article className={`rank-card rank-card--${rank}`}>
       <div className="rank-card-media">
@@ -167,7 +190,7 @@ export function RankCard({p, rank = "pair"}: {p: Product; rank?: "lead" | "pair"
   );
 }
 
-export function TopThree({products}: {products: Product[]}) {
+export function TopThree({products}: {products: PublicProduct[]}) {
   const [first, second, third] = products;
   if (!first) return null;
   return (
@@ -185,7 +208,7 @@ export function TopThree({products}: {products: Product[]}) {
 
 type CompareState = {checked: boolean; disabled: boolean; onToggle: () => void};
 
-function RankRow({p, compare}: {p: Product; compare?: CompareState}) {
+function RankRow({p, compare}: {p: PublicProduct; compare?: CompareState}) {
   return (
     <article className="rank-row" id={p.slug}>
       <span className="rank-row-num" aria-hidden="true">{String(p.position).padStart(2, "0")}</span>
@@ -211,7 +234,7 @@ function RankRow({p, compare}: {p: Product; compare?: CompareState}) {
 
 // ---------- Catalog: filters + list + comparator ----------
 
-export function Catalog({products}: {products: Product[]}) {
+export function Catalog({products}: {products: PublicProduct[]}) {
   const [type, setType] = useState("todos");
   const [anc, setAnc] = useState("todos");
   const [use, setUse] = useState("todos");
@@ -272,15 +295,15 @@ export function Catalog({products}: {products: Product[]}) {
 
 // ---------- Comparator ("bancada de teste") ----------
 
-function Comparator({items}: {items: Product[]}) {
-  const rows: [string, keyof Product, typeof IconType][] = [
+function Comparator({items}: {items: PublicProduct[]}) {
+  const rows: [string, keyof PublicProduct, typeof IconType][] = [
     ["Tipo", "type", IconType],
     ["Bateria", "battery", IconBattery],
     ["ANC", "anc", IconShield],
     ["Codec", "codec", IconWave],
     ["Resistência", "resistance", IconDrop],
     ["Multiponto", "multipoint", IconLink],
-    ["Principal benefício", "category", IconTag],
+    ["Principal benefício", "mainBenefit", IconTag],
   ];
   return (
     <section id="comparador" className="bench">
