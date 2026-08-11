@@ -52,16 +52,43 @@ type RankingItemRow = {
   product_id: string;
 };
 
-// Everything a published ranking must satisfy before it's safe to render
-// as a real Top 10 — reuses the exact same pure predicates the admin editor
-// uses to decide whether a ranking is allowed to publish in the first
-// place (lib/rankings-rules.ts), so the public read side can never quietly
-// drift from the write side's own definition of "valid". What those pure
-// functions can't check (does the product still exist / is it still
-// active, published, not deleted) is checked separately below against a
-// single batched product lookup — never one query per item.
-function isStructurallyValid(ranking: RankingRow, items: RankingItemRow[]): boolean {
-  if (!ranking.description?.trim() || !ranking.methodology?.trim()) return false;
+type ValidatedRankingFields = {title: string; description: string; methodology: string; publishedAt: string; updatedAt: string};
+
+function isValidIsoDate(value: string | null): value is string {
+  return typeof value === "string" && value.trim() !== "" && !Number.isNaN(new Date(value).getTime());
+}
+
+// Confirms — at runtime, not via a TypeScript non-null assertion — that a
+// "published" ranking row actually has everything a real Top 10 page needs
+// to render safely: a non-empty title/description/methodology, and a
+// genuinely valid (non-null, non-empty, parseable) published_at. A
+// `status='published'` row missing any of these is corrupt data (a bug, a
+// manual DB edit, a write path that skipped validation) — `!` on a
+// possibly-null column only silences TypeScript, it does nothing at
+// runtime, so every one of these is checked explicitly here and the
+// caller only ever gets a string back once it's proven to exist.
+// updated_at may be null (falls back to published_at, itself already
+// confirmed valid at that point) — but if updated_at is present, it must
+// also be a valid date, not just any non-null string.
+function validatePublishedRankingFields(ranking: RankingRow): ValidatedRankingFields | null {
+  const title = ranking.title?.trim();
+  const description = ranking.description?.trim();
+  const methodology = ranking.methodology?.trim();
+  if (!title || !description || !methodology) return null;
+  if (!isValidIsoDate(ranking.published_at)) return null;
+  if (ranking.updated_at !== null && !isValidIsoDate(ranking.updated_at)) return null;
+  return {title, description, methodology, publishedAt: ranking.published_at, updatedAt: ranking.updated_at ?? ranking.published_at};
+}
+
+// Everything the ranking_items side must satisfy before it's safe to
+// render as a real Top 10 — reuses the exact same pure predicates the
+// admin editor uses to decide whether a ranking is allowed to publish in
+// the first place (lib/rankings-rules.ts), so the public read side can
+// never quietly drift from the write side's own definition of "valid".
+// What those pure functions can't check (does the product still exist /
+// is it still active, published, not deleted) is checked separately below
+// against a single batched product lookup — never one query per item.
+function areItemsStructurallyValid(items: RankingItemRow[]): boolean {
   if (items.length !== 10) return false;
   if (!hasContinuousPositions(items.map((i) => ({position: i.position})))) return false;
   if (hasDuplicateProductIds(items.map((i) => ({productId: i.product_id})))) return false;
@@ -88,11 +115,18 @@ export function publicRankingBySlug(slug: string): PublicRankingResult {
   // Draft, or archived-and-never-published: not public at all.
   if (ranking.status !== "published") return {kind: "not_found"};
 
+  // Checked and narrowed to real, non-null strings *before* anything else
+  // — a published ranking missing a title/description/methodology/
+  // published_at is corrupt data and fails closed here, rather than a `!`
+  // further down silently forwarding null into rendered metadata/JSON-LD.
+  const fields = validatePublishedRankingFields(ranking);
+  if (!fields) return {kind: "invalid"};
+
   const items = db()
     .prepare(`SELECT position, badge, reason, main_benefit, main_limitation, product_id FROM ranking_items WHERE ranking_id=? ORDER BY position`)
     .all(ranking.id) as RankingItemRow[];
 
-  if (!isStructurallyValid(ranking, items)) return {kind: "invalid"};
+  if (!areItemsStructurallyValid(items)) return {kind: "invalid"};
 
   const productIds = items.map((i) => i.product_id);
   const placeholders = productIds.map(() => "?").join(",");
@@ -125,12 +159,12 @@ export function publicRankingBySlug(slug: string): PublicRankingResult {
   return {
     kind: "ok",
     ranking: {
-      title: ranking.title,
+      title: fields.title,
       slug: ranking.slug,
-      description: ranking.description ?? "",
-      methodology: ranking.methodology ?? "",
-      publishedAt: ranking.published_at!,
-      updatedAt: ranking.updated_at ?? ranking.published_at!,
+      description: fields.description,
+      methodology: fields.methodology,
+      publishedAt: fields.publishedAt,
+      updatedAt: fields.updatedAt,
     },
     items: publicItems,
   };

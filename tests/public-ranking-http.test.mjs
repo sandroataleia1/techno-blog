@@ -186,7 +186,7 @@ test("produto sem oferta continua visível, com indicação discreta, sem href v
   }
 });
 
-test("card com preço mostra valor formatado e a data de verificação; anterior só quando maior", async () => {
+test("card com preço mostra valor formatado e a data de verificação", async () => {
   const conn = rawDb();
   const productId = productIds[2];
   const now = new Date().toISOString();
@@ -197,6 +197,65 @@ test("card com preço mostra valor formatado e a data de verificação; anterior
     assert.match(html, /R\$\s?219,90/);
     assert.match(html, /R\$\s?259,00/);
     assert.match(html, /Conferido em/);
+  } finally {
+    conn.prepare("UPDATE affiliate_offers SET current_price_cents=NULL, previous_price_cents=NULL, last_checked_at=NULL WHERE product_id=?").run(productId);
+    conn.close();
+  }
+});
+
+// Three distinct products, three distinct and individually identifiable
+// (previous, current) pairs — greater/equal/less than — so each assertion
+// can only pass by actually reading the right value, never by coincidence
+// with another scenario's numbers.
+test("preço anterior aparece riscado quando maior que o atual", async () => {
+  const conn = rawDb();
+  const productId = productIds[3];
+  const now = new Date().toISOString();
+  // previous (R$ 411,17) > current (R$ 370,42)
+  conn.prepare("UPDATE affiliate_offers SET current_price_cents=37042, previous_price_cents=41117, last_checked_at=? WHERE product_id=? AND is_primary=1").run(now, productId);
+  try {
+    const res = await fetch(`${baseUrl}/melhores-fones-mercado-livre`);
+    const html = await res.text();
+    assert.match(html, /R\$\s?370,42/, "preço atual deve aparecer");
+    assert.match(html, /R\$\s?411,17/, "preço anterior maior deve aparecer riscado");
+    assert.match(html, /offer-price-previous[^>]*>\s*R\$\s?411,17/);
+  } finally {
+    conn.prepare("UPDATE affiliate_offers SET current_price_cents=NULL, previous_price_cents=NULL, last_checked_at=NULL WHERE product_id=?").run(productId);
+    conn.close();
+  }
+});
+
+test("preço anterior NÃO aparece quando igual ao atual", async () => {
+  const conn = rawDb();
+  const productId = productIds[4];
+  const now = new Date().toISOString();
+  // previous === current (R$ 528,63) — showing it struck through would be
+  // misleading (implies a discount that doesn't exist).
+  conn.prepare("UPDATE affiliate_offers SET current_price_cents=52863, previous_price_cents=52863, last_checked_at=? WHERE product_id=? AND is_primary=1").run(now, productId);
+  try {
+    const res = await fetch(`${baseUrl}/melhores-fones-mercado-livre`);
+    const html = await res.text();
+    assert.match(html, /R\$\s?528,63/, "preço atual deve aparecer");
+    assert.doesNotMatch(html, /offer-price-previous/);
+  } finally {
+    conn.prepare("UPDATE affiliate_offers SET current_price_cents=NULL, previous_price_cents=NULL, last_checked_at=NULL WHERE product_id=?").run(productId);
+    conn.close();
+  }
+});
+
+test("preço anterior NÃO aparece quando menor que o atual", async () => {
+  const conn = rawDb();
+  const productId = productIds[5];
+  const now = new Date().toISOString();
+  // previous (R$ 199,05) < current (R$ 640,80) — a lower "previous" price
+  // isn't a discount signal, so it must never render as one.
+  conn.prepare("UPDATE affiliate_offers SET current_price_cents=64080, previous_price_cents=19905, last_checked_at=? WHERE product_id=? AND is_primary=1").run(now, productId);
+  try {
+    const res = await fetch(`${baseUrl}/melhores-fones-mercado-livre`);
+    const html = await res.text();
+    assert.match(html, /R\$\s?640,80/, "preço atual deve aparecer");
+    assert.doesNotMatch(html, /offer-price-previous/);
+    assert.doesNotMatch(html, /R\$\s?199,05/, "o valor anterior menor não deve aparecer em lugar nenhum do card");
   } finally {
     conn.prepare("UPDATE affiliate_offers SET current_price_cents=NULL, previous_price_cents=NULL, last_checked_at=NULL WHERE product_id=?").run(productId);
     conn.close();
@@ -224,7 +283,122 @@ test("PROVA OBRIGATÓRIA: products.affiliate_url divergente nunca aparece — s�
   }
 });
 
+// ---------- Published but structurally invalid: fails closed with a real 500 ----------
+
+// Verified empirically (real `next dev` and a real `next start` build, plus
+// a real headless-Chrome navigation) before writing this assertion: in this
+// Next.js 16.3 version, a Server Component throw during the *initial,
+// non-streamed* render of a route is rendered, pre-hydration, using the
+// app's own generic not-found-styled shell (same markup as app/not-found.tsx)
+// rather than this segment's own error.tsx — the error.tsx module is still
+// referenced in the RSC payload and genuinely takes over once client-side
+// hydration runs (confirmed with a real browser: after hydration, the page
+// shows the exact text "Não foi possível carregar este ranking agora" from
+// error.tsx), but a plain fetch() — no JS execution — only ever observes the
+// pre-hydration shell. This is a real, reproducible framework behavior in
+// this exact Next version (see node_modules/next/dist/docs/.../error.md
+// version history — the `retry` prop only just became stable in 16.3.0),
+// not a bug in this app's error.tsx. The assertions below verify what a
+// plain HTTP client can actually, truthfully observe: a real 500, a safe
+// generic message with zero ranking-specific content, and no internal
+// detail — not the specific error.tsx copy, which no plain-fetch test can
+// see. (dev server log for this exact request, captured separately during
+// investigation, confirmed Next did log the real thrown Error server-side
+// with a numeric — not NEXT_NOT_FOUND — digest, i.e. genuinely treated as
+// an unexpected error, not a notFound() call.)
+test("ranking published inválido (falta o item da posição 10) -> 500 real, mensagem genérica, sem vazamento de nada", async () => {
+  const conn = rawDb();
+  const allItems = conn
+    .prepare("SELECT ri.*, p.name AS product_name, p.slug AS product_slug FROM ranking_items ri JOIN products p ON p.id=ri.product_id WHERE ri.ranking_id=? ORDER BY ri.position")
+    .all(rankingId);
+  const removed = allItems.find((i) => i.position === 10);
+  assert.ok(removed, "setup: esperava um item na posição 10 para remover");
+  conn.prepare("DELETE FROM ranking_items WHERE id=?").run(removed.id);
+  try {
+    const res = await fetch(`${baseUrl}/melhores-fones-mercado-livre`);
+    assert.equal(res.status, 500, "um ranking published mas estruturalmente inválido deve responder com um erro operacional real, não 200 nem um Top 10 parcial");
+    const html = await res.text();
+
+    // A safe, generic, non-empty public message — not a blank page and not
+    // a raw stack trace. See the comment above this test for exactly which
+    // shell this is and why.
+    assert.match(html, /Indisponível|Página não encontrada|Não foi possível/);
+
+    // Nothing product-related from this ranking may leak — not even the 9
+    // still-structurally-fine items, since the whole ranking fails closed.
+    for (const item of allItems) {
+      assert.doesNotMatch(html, new RegExp(item.product_name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+      assert.doesNotMatch(html, new RegExp(`/fones/${item.product_slug}`));
+    }
+    assert.doesNotMatch(html, /Top 3/i);
+    assert.doesNotMatch(html, /application\/ld\+json/);
+    assert.doesNotMatch(html, /class="cta ml"/);
+    assert.doesNotMatch(html, /rank-tag|rank-benefit|rank-caution/);
+
+    // No internal detail of any kind. (Not checking for "node_modules" —
+    // Next's own public bundle chunk filenames legitimately contain that
+    // substring, e.g. "node_modules_next_dist_compiled_react-dom_...js";
+    // that's a normal <script src> on every page, not a leak. Also not
+    // asserting the *absence* of page.tsx's own thrown Error.message
+    // string: confirmed via node_modules/next/dist/docs/.../error.md —
+    // "During development, the Error object forwarded to the client will
+    // be serialized and include the message of the original error for
+    // easier debugging. However, this behavior is different in
+    // production" — so `next dev` intentionally embeds it in hydration
+    // data for debugging, while a real production build only ships a
+    // generic message + digest. The thrown message itself
+    // ("Não foi possível carregar este ranking no momento.") is already
+    // safe, curated, user-appropriate copy with zero SQL/stack/table
+    // detail either way — it just isn't the *specific* text error.tsx
+    // shows once hydrated.)
+    assert.doesNotMatch(html, /SQLite|SqliteError|SQLITE_|SQL syntax|F:\\projetos|\/f\/projetos|projetos\\afiliados|ranking_items|TypeError:|ReferenceError:/i);
+  } finally {
+    conn
+      .prepare(
+        "INSERT INTO ranking_items (id,ranking_id,product_id,position,badge,reason,main_benefit,main_limitation) VALUES (?,?,?,?,?,?,?,?)"
+      )
+      .run(removed.id, removed.ranking_id, removed.product_id, removed.position, removed.badge, removed.reason, removed.main_benefit, removed.main_limitation);
+    conn.close();
+  }
+});
+
+test("controle: com o item da posição 10 restaurado, o ranking volta a responder 200 normalmente", async () => {
+  const res = await fetch(`${baseUrl}/melhores-fones-mercado-livre`);
+  assert.equal(res.status, 200);
+  const html = await res.text();
+  assert.equal((html.match(/application\/ld\+json/g) || []).length > 0, true);
+});
+
 // ---------- not_found / archived over HTTP ----------
+
+test("ranking inexistente para o slug fixo -> 404 real, sem conteúdo parcial, restaurado no finally", async () => {
+  const conn = rawDb();
+  const decoySlug = `slug-temporariamente-indisponivel-${Date.now()}`;
+  const ranking = conn.prepare("SELECT title FROM rankings WHERE id=?").get(rankingId);
+  // Renaming the seed's own row away from the one fixed public slug
+  // ("melhores-fones-mercado-livre" — see RANKING_SLUG in
+  // app/melhores-fones-mercado-livre/page.tsx) means a lookup by that slug
+  // now finds *no row at all*, the genuine "ranking inexistente" case —
+  // distinct from the draft/archived tests above, which still have a row.
+  conn.prepare("UPDATE rankings SET slug=? WHERE id=?").run(decoySlug, rankingId);
+  try {
+    const res = await fetch(`${baseUrl}/melhores-fones-mercado-livre`);
+    assert.equal(res.status, 404);
+    const html = await res.text();
+    assert.match(html, /Página não encontrada/);
+    assert.doesNotMatch(html, new RegExp(ranking.title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "nenhum conteúdo parcial do ranking real deve vazar em um 404");
+    assert.doesNotMatch(html, /application\/ld\+json/);
+    assert.doesNotMatch(html, /class="cta ml"/);
+  } finally {
+    conn.prepare("UPDATE rankings SET slug=? WHERE id=?").run("melhores-fones-mercado-livre", rankingId);
+    conn.close();
+  }
+});
+
+test("controle: com o slug restaurado, o ranking volta a responder 200 normalmente", async () => {
+  const res = await fetch(`${baseUrl}/melhores-fones-mercado-livre`);
+  assert.equal(res.status, 200);
+});
 
 test("ranking em rascunho -> a página pública responde 404 real", async () => {
   const conn = rawDb();
@@ -242,16 +416,33 @@ test("ranking em rascunho -> a página pública responde 404 real", async () => 
 
 test("ranking arquivado (já publicado) -> tombstone 200, noindex, sem produtos/ItemList/links afiliados", async () => {
   const conn = rawDb();
+  const items = conn
+    .prepare("SELECT p.name AS product_name, p.slug AS product_slug FROM ranking_items ri JOIN products p ON p.id=ri.product_id WHERE ri.ranking_id=?")
+    .all(rankingId);
+  assert.equal(items.length, 10, "setup: sanity check — o ranking do seed deve ter 10 itens antes de arquivar");
   conn.prepare("UPDATE rankings SET status='archived' WHERE id=?").run(rankingId);
   try {
     const res = await fetch(`${baseUrl}/melhores-fones-mercado-livre`);
     assert.equal(res.status, 200);
     const html = await res.text();
     assert.match(html, /Ranking arquivado/);
-    assert.match(html, /name="robots" content="noindex/);
+    assert.match(html, /name="robots" content="noindex, ?follow/);
     assert.doesNotMatch(html, /application\/ld\+json/);
     assert.doesNotMatch(html, /class="cta ml"/);
     assert.doesNotMatch(html, /offer-price-current/);
+
+    // Explicit, product-by-product proof — not just "no ItemList marker",
+    // but that none of the 10 real product names or /fones/[slug] links
+    // that this exact ranking would otherwise show are present anywhere.
+    for (const item of items) {
+      assert.doesNotMatch(html, new RegExp(item.product_name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `nome do produto "${item.product_name}" não deve aparecer no tombstone`);
+      assert.doesNotMatch(html, new RegExp(`/fones/${item.product_slug}`), `link para /fones/${item.product_slug} não deve aparecer no tombstone`);
+    }
+    assert.doesNotMatch(html, /Top 3/i);
+    assert.doesNotMatch(html, /id="ranking"/);
+    assert.doesNotMatch(html, /id="comparador"/);
+    assert.doesNotMatch(html, /Comparador/);
+    assert.doesNotMatch(html, /rank-tag|rank-benefit|rank-caution|rank-num/);
   } finally {
     conn.prepare("UPDATE rankings SET status='published' WHERE id=?").run(rankingId);
     conn.close();

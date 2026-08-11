@@ -203,6 +203,20 @@ test("ranking publicado sem descrição ou metodologia falha fechado", () => {
   assert.equal(publicRankingBySlug(r.slug).kind, "invalid");
 });
 
+test("ranking publicado com published_at NULL falha fechado — nunca confia em '!' para isso em runtime", () => {
+  const r = createRanking(publishedRankingInput());
+  db().prepare("UPDATE rankings SET published_at=NULL WHERE id=?").run(r.id);
+  const result = publicRankingBySlug(r.slug);
+  assert.equal(result.kind, "invalid");
+});
+
+test("ranking publicado com title vazio (string em branco) falha fechado", () => {
+  const r = createRanking(publishedRankingInput());
+  db().prepare("UPDATE rankings SET title='   ' WHERE id=?").run(r.id);
+  const result = publicRankingBySlug(r.slug);
+  assert.equal(result.kind, "invalid");
+});
+
 // ---------- Product eligibility ----------
 
 test("produto inativo entre os itens impede a publicação pública", () => {
@@ -295,22 +309,59 @@ test("oferta principal ativa é usada no item do ranking", () => {
   }
 });
 
-test("oferta inativa, quebrada ou não principal é ignorada — o produto continua no ranking com offer:null", () => {
+// Each of the three ways an offer can become ineligible for public display
+// is tested on its own so a regression in any single one is diagnosed by
+// name, not lumped into "some offer scenario failed" — and each also
+// re-confirms the fallback-to-products.affiliate_url prohibition, since
+// that guarantee has to hold independently in every one of these states,
+// not just in the "no offer row at all" case.
+function assertOfferIneligibleScenario(mutate, restore) {
   const r = createRanking(publishedRankingInput());
   const targetId = tenValidItems()[0].productId;
   const conn = db();
-  // demote the seeded primary offer for this product and leave it with no
-  // eligible replacement
-  conn.prepare("UPDATE affiliate_offers SET is_primary=0 WHERE product_id=?").run(targetId);
+  const decoyUrl = "https://meli.la/DECOY-NUNCA-DEVE-SER-FALLBACK";
+  const originalProductUrl = conn.prepare("SELECT affiliate_url FROM products WHERE id=?").get(targetId).affiliate_url;
+  conn.prepare("UPDATE products SET affiliate_url=? WHERE id=?").run(decoyUrl, targetId);
+  mutate(conn, targetId);
   try {
     const result = publicRankingBySlug(r.slug);
-    assert.equal(result.kind, "ok", "ausência de oferta não deve invalidar o ranking");
+    assert.equal(result.kind, "ok", "ausência de oferta elegível não deve invalidar o ranking");
     const it = result.items.find((i) => i.id === targetId);
     assert.ok(it, "o produto continua presente no ranking");
     assert.equal(it.offer, null);
   } finally {
-    conn.prepare("UPDATE affiliate_offers SET is_primary=1 WHERE product_id=? AND status='active'").run(targetId);
+    restore(conn, targetId);
+    conn.prepare("UPDATE products SET affiliate_url=? WHERE id=?").run(originalProductUrl, targetId);
   }
+}
+
+test("oferta com status inactive é ignorada — produto visível, offer:null, sem fallback para products.affiliate_url", () => {
+  let originalStatus;
+  assertOfferIneligibleScenario(
+    (conn, targetId) => {
+      originalStatus = conn.prepare("SELECT status FROM affiliate_offers WHERE product_id=? AND is_primary=1").get(targetId).status;
+      conn.prepare("UPDATE affiliate_offers SET status='inactive' WHERE product_id=? AND is_primary=1").run(targetId);
+    },
+    (conn, targetId) => conn.prepare("UPDATE affiliate_offers SET status=? WHERE product_id=? AND is_primary=1").run(originalStatus, targetId)
+  );
+});
+
+test("oferta com status broken é ignorada — produto visível, offer:null, sem fallback para products.affiliate_url", () => {
+  let originalStatus;
+  assertOfferIneligibleScenario(
+    (conn, targetId) => {
+      originalStatus = conn.prepare("SELECT status FROM affiliate_offers WHERE product_id=? AND is_primary=1").get(targetId).status;
+      conn.prepare("UPDATE affiliate_offers SET status='broken' WHERE product_id=? AND is_primary=1").run(targetId);
+    },
+    (conn, targetId) => conn.prepare("UPDATE affiliate_offers SET status=? WHERE product_id=? AND is_primary=1").run(originalStatus, targetId)
+  );
+});
+
+test("oferta com is_primary=0 é ignorada — produto visível, offer:null, sem fallback para products.affiliate_url", () => {
+  assertOfferIneligibleScenario(
+    (conn, targetId) => conn.prepare("UPDATE affiliate_offers SET is_primary=0 WHERE product_id=?").run(targetId),
+    (conn, targetId) => conn.prepare("UPDATE affiliate_offers SET is_primary=1 WHERE product_id=? AND status='active'").run(targetId)
+  );
 });
 
 test("products.affiliate_url nunca é usado como fallback — prova com URL divergente deliberada", () => {
