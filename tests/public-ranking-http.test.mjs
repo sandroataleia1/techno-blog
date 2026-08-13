@@ -440,8 +440,12 @@ test("ranking arquivado (já publicado) -> tombstone 200, noindex, sem produtos/
     }
     assert.doesNotMatch(html, /Top 3/i);
     assert.doesNotMatch(html, /id="ranking"/);
+    // The comparator *section* must not render (id, its own heading/table
+    // markup) — the site-wide header nav legitimately keeps a "Comparador"
+    // link on every page, including this one, so the word alone isn't a
+    // valid signal; the actual section is.
     assert.doesNotMatch(html, /id="comparador"/);
-    assert.doesNotMatch(html, /Comparador/);
+    assert.doesNotMatch(html, /Bancada de teste|bench-table|bench-frame/);
     assert.doesNotMatch(html, /rank-tag|rank-benefit|rank-caution|rank-num/);
   } finally {
     conn.prepare("UPDATE rankings SET status='published' WHERE id=?").run(rankingId);

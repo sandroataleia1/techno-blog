@@ -263,6 +263,13 @@ const migrations: Migration[] = [
       conn.exec("ALTER TABLE affiliate_offers DROP COLUMN previous_price");
     },
   },
+
+  // ---- Homepage content blocks: admin-configurable grid sections (any category, not just headphones) ----
+
+  {
+    id: "024_homepage_blocks",
+    sql: `CREATE TABLE homepage_blocks (id TEXT PRIMARY KEY,title TEXT NOT NULL,content_mode TEXT NOT NULL CHECK(content_mode IN ('photo','text','both')),columns INTEGER NOT NULL CHECK(columns BETWEEN 1 AND 6),display_order INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','published','archived')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL); CREATE INDEX homepage_blocks_status ON homepage_blocks(status); CREATE TABLE homepage_block_items (id TEXT PRIMARY KEY,block_id TEXT NOT NULL REFERENCES homepage_blocks(id),position INTEGER NOT NULL CHECK(position>0),image_id TEXT REFERENCES media_assets(id),text TEXT,link_url TEXT NOT NULL, UNIQUE(block_id,position)); CREATE INDEX homepage_block_items_block ON homepage_block_items(block_id);`,
+  },
 ];
 
 function applyMigrations(conn: Database.Database) {

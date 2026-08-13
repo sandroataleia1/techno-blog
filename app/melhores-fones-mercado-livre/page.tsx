@@ -1,7 +1,7 @@
 import {cache} from "react";
 import type {Metadata} from "next";
 import {notFound} from "next/navigation";
-import {Catalog, Disclosure, Footer, Header, Newsletter, Share, TopThree} from "@/components";
+import {Catalog, Disclosure, Footer, Header, Share, TopThree} from "@/components";
 import {site} from "@/lib/site";
 import {publicRankingBySlug} from "@/lib/public-rankings";
 
@@ -35,7 +35,11 @@ export async function generateMetadata(): Promise<Metadata> {
   return {};
 }
 
-export default function Article() {
+const VALID_USE_FILTERS = ["academia", "trabalho", "viagem", "cotidiano"];
+
+export default async function Article({searchParams}: {searchParams: Promise<{uso?: string}>}) {
+  const {uso} = await searchParams;
+  const initialUse = uso && VALID_USE_FILTERS.includes(uso) ? uso : undefined;
   const result = getRanking();
 
   if (result.kind === "not_found") notFound();
@@ -96,7 +100,7 @@ export default function Article() {
           <p className="lead">{ranking.description}</p>
           <Disclosure />
           <nav className="toc"><a href="#ranking">Ranking e filtros</a> · <a href="#comparador">Comparador</a></nav>
-          <Share />
+          <Share url={`${site.url}/${RANKING_SLUG}`} />
         </div>
 
         <section>
@@ -119,7 +123,7 @@ export default function Article() {
                 <h2>Filtre, compare e escolha</h2>
               </div>
             </div>
-            <Catalog products={items} />
+            <Catalog products={items} initialUse={initialUse} />
           </div>
         </section>
 
@@ -129,8 +133,6 @@ export default function Article() {
             <p>{ranking.methodology}</p>
           </div>
         </section>
-
-        <Newsletter />
       </main>
       <Footer />
       <script type="application/ld+json" dangerouslySetInnerHTML={{__html: jsonLd}} />

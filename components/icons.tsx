@@ -199,6 +199,16 @@ export function IconGrid(props: IconProps) {
   );
 }
 
+export function IconLayout(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <rect x="3.5" y="4" width="17" height="16" rx="1.5" />
+      <path d="M3.5 9.5h17" />
+      <path d="M9 9.5V20" />
+    </svg>
+  );
+}
+
 export function IconList(props: IconProps) {
   return (
     <svg {...base} {...props}>
@@ -236,6 +246,35 @@ export function IconExternal(props: IconProps) {
       <path d="M9 6H6.5A1.5 1.5 0 0 0 5 7.5v10A1.5 1.5 0 0 0 6.5 19h10a1.5 1.5 0 0 0 1.5-1.5V15" />
       <path d="M14 5h5v5" />
       <path d="M19 5 11 13" />
+    </svg>
+  );
+}
+
+export function IconChevronLeft(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M15 5.5 8 12l7 6.5" />
+    </svg>
+  );
+}
+
+export function IconChevronRight(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M9 5.5 16 12l-7 6.5" />
+    </svg>
+  );
+}
+
+export function IconScale(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M12 3v18" />
+      <path d="M6.5 6h11" />
+      <path d="M3 15 6.5 6 10 15" />
+      <path d="M3 15c0 1.4 1.6 2.5 3.5 2.5S10 16.4 10 15" />
+      <path d="M14 15 17.5 6 21 15" />
+      <path d="M14 15c0 1.4 1.6 2.5 3.5 2.5S21 16.4 21 15" />
     </svg>
   );
 }
