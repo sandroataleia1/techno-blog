@@ -1,35 +1,8 @@
-// Real HTTP behavioral tests for auth/CSRF/error-shape on the rankings
-// admin API: every 401 and 403 asserts both status and exact response
-// body (never the raw UNAUTHORIZED/FORBIDDEN control-flow marker), and a
-// null or malformed JSON body is confirmed to produce the same safe 400
-// rather than a leaked TypeError or JSON-parser message. The "unexpected
-// error -> 500" branch of translateRankingError() is instead covered by
-// tests/admin-rankings.test.mjs, which calls the real translator directly
-// with real unexpected error objects (TypeError, an unrecognized Error, a
-// thrown non-Error value) — those specific failures cannot legitimately be
-// triggered through a live HTTP request against this app, since every
-// reachable input path is pre-validated into a RankingValidationError
-// first; the routes never contain a deliberately-reachable "crash" branch
-// to demonstrate over HTTP, which is the point.
-//
-// Why this isn't just "import the route handler and call it": requireAdmin()
-// -> adminSession() calls cookies() from "next/headers", which reads Next's
-// internal AsyncLocalStorage-based request store (workAsyncStorage /
-// workUnitAsyncStorage). Outside a request actually routed through Next's
-// own server, that store doesn't exist and cookies() throws synchronously
-// (confirmed directly against node_modules/next/dist/server/request/cookies.js:
-// "`cookies` was called outside a request scope"). Every route's outer
-// try/catch swallows that throw into the same 401 this test is trying to
-// verify — meaning a direct-import test would return 401 unconditionally,
-// regardless of whether a valid session cookie was actually present. That's
-// not a behavioral test, it's a coincidence with a passing assertion
-// attached. Reconstructing Next's internal request-store shape by hand
-// (createRequestStoreForAPI, workStore, RequestCookies adapters, etc.) is
-// deep, undocumented, version-specific internal API — the actually robust
-// way to exercise this code path is to run it, so this spawns the real
-// `next dev` server against an isolated temporary database and drives it
-// with real fetch() calls, including a real login to get a genuine signed
-// session cookie.
+// Real HTTP behavioral tests for auth/CSRF/error-shape on the homepage
+// blocks admin API — same technique and rationale as
+// tests/admin-rankings-http.test.mjs (see that file's header comment for
+// why this has to spawn a real `next dev` server rather than import the
+// route handlers directly: cookies() throws outside a real request scope).
 import test from "node:test";
 import assert from "node:assert/strict";
 import {spawn} from "node:child_process";
@@ -41,14 +14,12 @@ import path from "node:path";
 import Database from "better-sqlite3";
 
 const PROJECT_ROOT = path.join(import.meta.dirname, "..");
-const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "techno-blog-rankings-http-"));
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "techno-blog-homepage-blocks-http-"));
 const dbPath = path.join(tempDir, "test.sqlite");
 
 const ADMIN_EMAIL = "http-test@local.test";
 const ADMIN_PASSWORD = "http-behavioral-test-password-2026";
 const salt = crypto.randomBytes(16).toString("hex");
-// A real process env var, not a .env* file — never passes through Next's
-// dotenv-expand, so the direct (unencoded) hash form is safe to use here.
 const ADMIN_PASSWORD_HASH = `scrypt$${salt}$${crypto.scryptSync(ADMIN_PASSWORD, salt, 64).toString("hex")}`;
 const ADMIN_SESSION_SECRET = crypto.randomBytes(32).toString("hex");
 
@@ -70,14 +41,13 @@ function getFreePort() {
 let serverProcess;
 let baseUrl;
 let sessionCookie;
-let categoryId;
-let sampleRankingId;
+let sampleBlockId;
 
 function dbSnapshot() {
   const db = new Database(dbPath, {readonly: true});
   const snapshot = {
-    rankings: db.prepare("SELECT count(*) n FROM rankings").get().n,
-    items: db.prepare("SELECT count(*) n FROM ranking_items").get().n,
+    blocks: db.prepare("SELECT count(*) n FROM homepage_blocks").get().n,
+    items: db.prepare("SELECT count(*) n FROM homepage_block_items").get().n,
   };
   db.close();
   return snapshot;
@@ -123,26 +93,16 @@ test.before(async () => {
   assert.ok(setCookie, "setup: login must set a session cookie");
   sessionCookie = setCookie.split(";")[0];
 
-  // Login itself never touches the database (credentials are env-var-only) —
-  // the sqlite file at dbPath doesn't exist on disk until the server's own
-  // db() runs for the first time, which only happens inside a route that
-  // actually queries something. This authenticated read forces that
-  // initialization (full migration chain + seed) before this file opens the
-  // same path directly below.
-  const warmupRes = await fetch(`${baseUrl}/api/admin/rankings`, {headers: {cookie: sessionCookie}});
+  const warmupRes = await fetch(`${baseUrl}/api/admin/homepage-blocks`, {headers: {cookie: sessionCookie}});
   assert.equal(warmupRes.status, 200, "setup: authenticated read must succeed to initialize the database file");
 
-  const db = new Database(dbPath, {readonly: true});
-  categoryId = db.prepare("SELECT id FROM categories WHERE slug='fones-de-ouvido'").get().id;
-  db.close();
-
-  const createRes = await fetch(`${baseUrl}/api/admin/rankings`, {
+  const createRes = await fetch(`${baseUrl}/api/admin/homepage-blocks`, {
     method: "POST",
     headers: {"content-type": "application/json", cookie: sessionCookie, origin: baseUrl},
-    body: JSON.stringify({title: "Ranking HTTP de teste", slug: "http-test-ranking", categoryId, description: null, methodology: null, status: "draft", items: []}),
+    body: JSON.stringify({title: "Bloco HTTP de teste", contentMode: "text", columns: 3, displayOrder: 0, status: "draft", items: []}),
   });
   assert.equal(createRes.status, 201, "setup: authenticated same-origin create must succeed to have a real id for the [id] tests");
-  sampleRankingId = (await createRes.json()).id;
+  sampleBlockId = (await createRes.json()).id;
 });
 
 test.after(async () => {
@@ -150,13 +110,13 @@ test.after(async () => {
     serverProcess.kill();
     await new Promise((resolve) => {
       serverProcess.once("exit", resolve);
-      setTimeout(resolve, 5000); // don't hang the suite if the process is slow to exit
+      setTimeout(resolve, 5000);
     });
   }
   try {
     fs.rmSync(tempDir, {recursive: true, force: true});
   } catch {
-    // best-effort — see the equivalent note in admin-offers-price-migration.test.mjs
+    // best-effort
   }
 });
 
@@ -164,45 +124,45 @@ const UNAUTHORIZED_BODY = {error: "Não autorizado"};
 const FORBIDDEN_BODY = {error: "Requisição proibida"};
 const BAD_BODY_RESPONSE = {error: "Corpo da requisição inválido."};
 
-test("GET /api/admin/rankings sem sessão -> 401, corpo genérico", async () => {
-  const res = await fetch(`${baseUrl}/api/admin/rankings`);
+test("GET /api/admin/homepage-blocks sem sessão -> 401, corpo genérico", async () => {
+  const res = await fetch(`${baseUrl}/api/admin/homepage-blocks`);
   assert.equal(res.status, 401);
   assert.deepEqual(await res.json(), UNAUTHORIZED_BODY);
 });
 
-test("POST /api/admin/rankings sem sessão -> 401, corpo genérico, e não altera o banco", async () => {
+test("POST /api/admin/homepage-blocks sem sessão -> 401, corpo genérico, e não altera o banco", async () => {
   const before = dbSnapshot();
-  const res = await fetch(`${baseUrl}/api/admin/rankings`, {
+  const res = await fetch(`${baseUrl}/api/admin/homepage-blocks`, {
     method: "POST",
     headers: {"content-type": "application/json"},
-    body: JSON.stringify({title: "sem sessão", slug: "sem-sessao", categoryId, status: "draft", items: []}),
+    body: JSON.stringify({title: "sem sessão", contentMode: "text", columns: 3, status: "draft", items: []}),
   });
   assert.equal(res.status, 401);
   assert.deepEqual(await res.json(), UNAUTHORIZED_BODY);
   assert.deepEqual(dbSnapshot(), before);
 });
 
-test("GET /api/admin/rankings/[id] sem sessão -> 401, corpo genérico", async () => {
-  const res = await fetch(`${baseUrl}/api/admin/rankings/${sampleRankingId}`);
+test("GET /api/admin/homepage-blocks/[id] sem sessão -> 401, corpo genérico", async () => {
+  const res = await fetch(`${baseUrl}/api/admin/homepage-blocks/${sampleBlockId}`);
   assert.equal(res.status, 401);
   assert.deepEqual(await res.json(), UNAUTHORIZED_BODY);
 });
 
-test("PATCH /api/admin/rankings/[id] sem sessão -> 401, corpo genérico, e não altera o banco", async () => {
+test("PATCH /api/admin/homepage-blocks/[id] sem sessão -> 401, corpo genérico, e não altera o banco", async () => {
   const before = dbSnapshot();
-  const res = await fetch(`${baseUrl}/api/admin/rankings/${sampleRankingId}`, {
+  const res = await fetch(`${baseUrl}/api/admin/homepage-blocks/${sampleBlockId}`, {
     method: "PATCH",
     headers: {"content-type": "application/json"},
-    body: JSON.stringify({title: "hackeado sem sessão", slug: "http-test-ranking", categoryId, status: "draft", items: []}),
+    body: JSON.stringify({title: "hackeado sem sessão", contentMode: "text", columns: 3, status: "draft", items: []}),
   });
   assert.equal(res.status, 401);
   assert.deepEqual(await res.json(), UNAUTHORIZED_BODY);
   assert.deepEqual(dbSnapshot(), before);
 });
 
-test("DELETE /api/admin/rankings/[id] sem sessão -> 401, corpo genérico, e não altera o banco", async () => {
+test("DELETE /api/admin/homepage-blocks/[id] sem sessão -> 401, corpo genérico, e não altera o banco", async () => {
   const before = dbSnapshot();
-  const res = await fetch(`${baseUrl}/api/admin/rankings/${sampleRankingId}`, {method: "DELETE"});
+  const res = await fetch(`${baseUrl}/api/admin/homepage-blocks/${sampleBlockId}`, {method: "DELETE"});
   assert.equal(res.status, 401);
   assert.deepEqual(await res.json(), UNAUTHORIZED_BODY);
   assert.deepEqual(dbSnapshot(), before);
@@ -210,10 +170,10 @@ test("DELETE /api/admin/rankings/[id] sem sessão -> 401, corpo genérico, e nã
 
 test("POST autenticado com Origin inválido -> 403, corpo genérico, e não altera o banco", async () => {
   const before = dbSnapshot();
-  const res = await fetch(`${baseUrl}/api/admin/rankings`, {
+  const res = await fetch(`${baseUrl}/api/admin/homepage-blocks`, {
     method: "POST",
     headers: {"content-type": "application/json", cookie: sessionCookie, origin: "https://evil.example"},
-    body: JSON.stringify({title: "csrf create", slug: "csrf-create-attempt", categoryId, status: "draft", items: []}),
+    body: JSON.stringify({title: "csrf create", contentMode: "text", columns: 3, status: "draft", items: []}),
   });
   assert.equal(res.status, 403);
   assert.deepEqual(await res.json(), FORBIDDEN_BODY);
@@ -222,10 +182,10 @@ test("POST autenticado com Origin inválido -> 403, corpo genérico, e não alte
 
 test("PATCH autenticado com Origin inválido -> 403, corpo genérico, e não altera o banco", async () => {
   const before = dbSnapshot();
-  const res = await fetch(`${baseUrl}/api/admin/rankings/${sampleRankingId}`, {
+  const res = await fetch(`${baseUrl}/api/admin/homepage-blocks/${sampleBlockId}`, {
     method: "PATCH",
     headers: {"content-type": "application/json", cookie: sessionCookie, origin: "https://evil.example"},
-    body: JSON.stringify({title: "csrf patch", slug: "http-test-ranking", categoryId, status: "draft", items: []}),
+    body: JSON.stringify({title: "csrf patch", contentMode: "text", columns: 3, status: "draft", items: []}),
   });
   assert.equal(res.status, 403);
   assert.deepEqual(await res.json(), FORBIDDEN_BODY);
@@ -234,7 +194,7 @@ test("PATCH autenticado com Origin inválido -> 403, corpo genérico, e não alt
 
 test("DELETE autenticado com Origin inválido -> 403, corpo genérico, e não altera o banco", async () => {
   const before = dbSnapshot();
-  const res = await fetch(`${baseUrl}/api/admin/rankings/${sampleRankingId}`, {
+  const res = await fetch(`${baseUrl}/api/admin/homepage-blocks/${sampleBlockId}`, {
     method: "DELETE",
     headers: {cookie: sessionCookie, origin: "https://evil.example"},
   });
@@ -245,7 +205,7 @@ test("DELETE autenticado com Origin inválido -> 403, corpo genérico, e não al
 
 test("POST autenticado com corpo JSON null -> 400, não um TypeError, e não altera o banco", async () => {
   const before = dbSnapshot();
-  const res = await fetch(`${baseUrl}/api/admin/rankings`, {
+  const res = await fetch(`${baseUrl}/api/admin/homepage-blocks`, {
     method: "POST",
     headers: {"content-type": "application/json", cookie: sessionCookie, origin: baseUrl},
     body: "null",
@@ -254,40 +214,12 @@ test("POST autenticado com corpo JSON null -> 400, não um TypeError, e não alt
   const body = await res.json();
   assert.deepEqual(body, BAD_BODY_RESPONSE);
   assert.doesNotMatch(body.error, /TypeError|Cannot read propert/i);
-  assert.deepEqual(dbSnapshot(), before);
-});
-
-test("PATCH autenticado com corpo JSON null -> 400, não um TypeError, e não altera o banco", async () => {
-  const before = dbSnapshot();
-  const res = await fetch(`${baseUrl}/api/admin/rankings/${sampleRankingId}`, {
-    method: "PATCH",
-    headers: {"content-type": "application/json", cookie: sessionCookie, origin: baseUrl},
-    body: "null",
-  });
-  assert.equal(res.status, 400);
-  const body = await res.json();
-  assert.deepEqual(body, BAD_BODY_RESPONSE);
-  assert.doesNotMatch(body.error, /TypeError|Cannot read propert/i);
-  assert.deepEqual(dbSnapshot(), before);
-});
-
-test("POST autenticado com JSON malformado -> 400, nunca a mensagem crua do parser", async () => {
-  const before = dbSnapshot();
-  const res = await fetch(`${baseUrl}/api/admin/rankings`, {
-    method: "POST",
-    headers: {"content-type": "application/json", cookie: sessionCookie, origin: baseUrl},
-    body: "{isso não é json",
-  });
-  assert.equal(res.status, 400);
-  const body = await res.json();
-  assert.deepEqual(body, BAD_BODY_RESPONSE);
-  assert.doesNotMatch(body.error, /JSON|Unexpected token|position/i);
   assert.deepEqual(dbSnapshot(), before);
 });
 
 test("PATCH autenticado com JSON malformado -> 400, nunca a mensagem crua do parser", async () => {
   const before = dbSnapshot();
-  const res = await fetch(`${baseUrl}/api/admin/rankings/${sampleRankingId}`, {
+  const res = await fetch(`${baseUrl}/api/admin/homepage-blocks/${sampleBlockId}`, {
     method: "PATCH",
     headers: {"content-type": "application/json", cookie: sessionCookie, origin: baseUrl},
     body: "{isso não é json",
@@ -299,13 +231,29 @@ test("PATCH autenticado com JSON malformado -> 400, nunca a mensagem crua do par
   assert.deepEqual(dbSnapshot(), before);
 });
 
+test("POST /api/admin/media sem sessão -> 401, corpo genérico", async () => {
+  const form = new FormData();
+  form.set("image", new Blob([new Uint8Array([1, 2, 3])], {type: "image/png"}), "x.png");
+  const res = await fetch(`${baseUrl}/api/admin/media`, {method: "POST", body: form});
+  assert.equal(res.status, 401);
+  assert.deepEqual(await res.json(), UNAUTHORIZED_BODY);
+});
+
+test("POST /api/admin/media autenticado com Origin inválido -> 403", async () => {
+  const form = new FormData();
+  form.set("image", new Blob([new Uint8Array([1, 2, 3])], {type: "image/png"}), "x.png");
+  const res = await fetch(`${baseUrl}/api/admin/media`, {method: "POST", headers: {cookie: sessionCookie, origin: "https://evil.example"}, body: form});
+  assert.equal(res.status, 403);
+  assert.deepEqual(await res.json(), FORBIDDEN_BODY);
+});
+
 test("controle: a mesma exclusão, com sessão válida e Origin correto, realmente funciona — prova que os 401/403 acima não são falsos positivos", async () => {
   const before = dbSnapshot();
-  const res = await fetch(`${baseUrl}/api/admin/rankings/${sampleRankingId}`, {
+  const res = await fetch(`${baseUrl}/api/admin/homepage-blocks/${sampleBlockId}`, {
     method: "DELETE",
     headers: {cookie: sessionCookie, origin: baseUrl},
   });
   assert.equal(res.status, 200);
   const after = dbSnapshot();
-  assert.equal(after.rankings, before.rankings - 1);
+  assert.equal(after.blocks, before.blocks - 1);
 });

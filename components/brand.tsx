@@ -2,6 +2,11 @@
 // every tech category, not tied to any one product type) and the data-bar
 // motif used sparingly across hero, dividers, footer and the OG image.
 
+// Stroke uses currentColor (driven by the --primary token) rather than a
+// hardcoded hex, specifically so this one mark can render in the public
+// site's teal identity or the admin panel's own purple identity — both
+// contexts render this same component, and each scopes --primary/color
+// differently (see globals.css: :root vs .admin-shell/.admin-login).
 export function LogoMark({tone = "on-light", size = 32, className}: {tone?: "on-light" | "on-dark"; size?: number; className?: string}) {
   const ledFill = tone === "on-dark" ? "#F5F2EA" : "#0B0F14";
   return (
@@ -10,12 +15,13 @@ export function LogoMark({tone = "on-light", size = 32, className}: {tone?: "on-
       height={size}
       viewBox="0 0 36 36"
       className={className}
+      style={{color: "var(--primary)"}}
       aria-hidden="true"
       focusable="false"
     >
-      <rect x="6" y="6" width="24" height="24" rx="7" fill="none" stroke="#8B5CF6" strokeWidth="3.2" />
-      <path d="M10.5 19h3.4l2.3-6.4 2.7 12.8 2.3-6.4h3.9" fill="none" stroke="#8B5CF6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <rect x="21.6" y="7.4" width="5.6" height="5.6" rx="1.4" fill={ledFill} stroke="#8B5CF6" strokeWidth="1.3" />
+      <rect x="6" y="6" width="24" height="24" rx="7" fill="none" stroke="currentColor" strokeWidth="3.2" />
+      <path d="M10.5 19h3.4l2.3-6.4 2.7 12.8 2.3-6.4h3.9" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="21.6" y="7.4" width="5.6" height="5.6" rx="1.4" fill={ledFill} stroke="currentColor" strokeWidth="1.3" />
     </svg>
   );
 }

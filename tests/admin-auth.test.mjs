@@ -108,12 +108,19 @@ test('logout: clearSession explicitly matches the same cookie path used at login
   assert.match(clearFn, /maxAge:\s*0/);
 });
 
-test('CSRF: requireAdminMutation checks session AND same-origin before allowing a mutation', () => {
+test('CSRF: requireAdminMutation checks session AND origin allowlist before allowing a mutation', () => {
   const admin = read('lib/admin.ts');
   const fn = admin.slice(admin.indexOf('export async function requireAdminMutation'), admin.indexOf('export async function clearSession'));
   assert.match(fn, /await requireAdmin\(\)/);
-  assert.match(fn, /sameOrigin\(req\)/);
+  assert.match(fn, /originAllowed\(req\)/);
   assert.match(fn, /FORBIDDEN/);
+});
+
+test('ADMIN_ALLOWED_ORIGINS: originAllowed nunca deriva a origem confiável de Host/X-Forwarded-Host — só de env', () => {
+  const admin = read('lib/admin.ts');
+  const fn = admin.slice(admin.indexOf('export function originAllowed'), admin.indexOf('export async function requireAdminMutation'));
+  assert.doesNotMatch(fn, /req\.url|x-forwarded-host|req\.headers\.get\(.host.\)/i);
+  assert.match(fn, /ADMIN_ALLOWED_ORIGINS/);
 });
 
 test('mutação sem autenticação: every state-changing admin API route requires requireAdminMutation, not just a plain read guard', () => {

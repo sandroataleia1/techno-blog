@@ -67,20 +67,74 @@ export async function requireAdmin() {
   if (!(await adminSession())) throw new Error("UNAUTHORIZED");
 }
 
-// Same-origin check for state-changing requests. SameSite=Lax already keeps
-// the cookie off cross-site POST/PATCH/DELETE, but browsers vary and this is
-// a second, independent layer that costs nothing — belt and suspenders, not
-// a replacement for SameSite. Use for every mutation handler (anything that
-// isn't a plain GET); a missing Origin header is treated as same-origin,
-// matching normal same-origin fetch() behavior in older browsers.
-export function sameOrigin(req: Request) {
-  const origin = req.headers.get("origin");
-  return !origin || origin === new URL(req.url).origin;
+// Explicit, ops-configured allowlist of the real domain(s) this admin is
+// reachable at — e.g. "https://technoblog.esis.com.br". Deliberately NOT
+// derived from the incoming request's Host/X-Forwarded-Host, nor from
+// Next's own req.url: in a standalone/Docker deployment, req.url's origin
+// reflects the process's own HOSTNAME bind address (typically 0.0.0.0, or
+// a container ID Docker assigns automatically) — never a real client-facing
+// domain — so comparing against it made every legitimate same-origin
+// mutation fail once deployed outside `next dev`. HOSTNAME must stay the
+// plain bind address; this env var is the correct, independent place for
+// the public origin(s).
+//
+// Parses a comma-separated list into canonical "scheme://host:port" strings
+// (http/https only, no path/query/credentials — anything else is silently
+// dropped, never partially trusted) so every later comparison is exact Set
+// membership, never a substring/prefix/suffix check.
+export function parseAllowedOrigins(raw: string | undefined): string[] {
+  if (!raw) return [];
+  const origins: string[] = [];
+  for (const part of raw.split(",")) {
+    const value = part.trim();
+    if (!value) continue;
+    let parsed: URL;
+    try {
+      parsed = new URL(value);
+    } catch {
+      continue; // malformed entry — dropped, not partially trusted
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") continue;
+    if (parsed.username || parsed.password) continue;
+    if ((parsed.pathname !== "/" && parsed.pathname !== "") || parsed.search || parsed.hash) continue;
+    origins.push(parsed.origin);
+  }
+  return origins;
+}
+
+// Exact match only, via Set.has() — never .includes()/.endsWith() on raw
+// strings, which is exactly the class of bug that lets
+// "https://technoblog.esis.com.br.evil.com" or
+// "https://eviltechnoblog.esis.com.br" slip past a naive substring/suffix
+// check. A missing, malformed, or non-http(s) Origin header is rejected,
+// same as one that parses fine but isn't in the allowlist — and an empty
+// allowlist (unset or fully invalid ADMIN_ALLOWED_ORIGINS) rejects every
+// request, in every environment: failing closed here is the whole point,
+// not a production-only special case.
+export function isAllowedOrigin(origin: string | null, allowed: string[]): boolean {
+  if (!origin || allowed.length === 0) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+  return new Set(allowed).has(parsed.origin);
+}
+
+// Second, independent layer on top of the session cookie's SameSite=Lax —
+// costs nothing, not a replacement for it. Use for every mutation handler
+// (anything that isn't a plain GET). `env` is injectable (defaults to
+// process.env) purely so tests can exercise this without mutating global
+// state, same convention as auth-crypto.ts's resolvePasswordHash.
+export function originAllowed(req: Request, env: Record<string, string | undefined> = process.env): boolean {
+  return isAllowedOrigin(req.headers.get("origin"), parseAllowedOrigins(env.ADMIN_ALLOWED_ORIGINS));
 }
 
 export async function requireAdminMutation(req: Request) {
   await requireAdmin();
-  if (!sameOrigin(req)) throw new Error("FORBIDDEN");
+  if (!originAllowed(req)) throw new Error("FORBIDDEN");
 }
 
 export async function clearSession() {

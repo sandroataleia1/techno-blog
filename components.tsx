@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 import Link from "next/link";
 import {useMemo, useState} from "react";
 import {externalProps, site} from "@/lib/site";
@@ -8,15 +9,12 @@ import {LogoMark, Wordmark, WaveMotif} from "@/components/brand";
 import {
   IconArrowRight,
   IconBattery,
-  IconBriefcase,
-  IconDiamond,
+  IconChevronLeft,
+  IconChevronRight,
   IconDrop,
-  IconDumbbell,
   IconFlag,
   IconImage,
   IconLink,
-  IconPlane,
-  IconSearch,
   IconShield,
   IconTag,
   IconType,
@@ -37,13 +35,8 @@ export function Header() {
         </Link>
         <nav className={`nav-links${open ? " is-open" : ""}`} aria-label="Principal" id="site-menu">
           <Link href="/melhores-fones-mercado-livre" onClick={close}>Ranking</Link>
-          <Link href="/melhores-fones-mercado-livre#comparador" onClick={close}>Comparativos</Link>
-          <Link href="/#guias" onClick={close}>Guias</Link>
+          <Link href="/melhores-fones-mercado-livre#comparador" onClick={close}>Comparador</Link>
           <Link href="/sobre" onClick={close}>Sobre</Link>
-          <label className="nav-search">
-            <IconSearch />
-            <input className="search" aria-label={`Buscar no ${site.name}`} placeholder="Buscar guias" />
-          </label>
         </nav>
         <div className="nav-actions">
           <Link className="cta nav-cta" href="/melhores-fones-mercado-livre">Ver ranking</Link>
@@ -74,7 +67,7 @@ export function Footer() {
             <p className="footer-heading">{site.name}</p>
             <Link href="/melhores-fones-mercado-livre">Ranking e comparativos</Link>
             <Link href="/sobre">Sobre</Link>
-            <Link href="/contato">Contato</Link>
+            {site.contact.email && <Link href="/contato">Contato</Link>}
             <Link href="/politica-editorial">Política editorial</Link>
             <Link href="/politica-de-correcoes">Política de correções</Link>
           </div>
@@ -141,7 +134,7 @@ export function ProductMedia({p, priority = false, className}: {p: PublicProduct
   return (
     <div className={`media-frame${className ? ` ${className}` : ""}`}>
       {p.image ? (
-        <img src={p.image} alt={p.alt} width={640} height={640} loading={priority ? "eager" : "lazy"} decoding="async" />
+        <Image src={p.image} alt={p.alt} width={640} height={640} priority={priority} sizes="(max-width: 760px) 100vw, 640px" />
       ) : (
         <div className="media-placeholder" role="img" aria-label={p.alt || `Imagem em atualização de ${p.name}`}>
           <IconImage width={40} height={40} />
@@ -163,6 +156,94 @@ export function QuickFacts({p}: {p: PublicProduct}) {
     </ul>
   );
 }
+
+// ---------- Home hero: product carousel ----------
+
+// A curated full-slide graphic for specific positions — supplied by the
+// site owner as a complete, ready-made banner (its own headline/badge
+// already drawn into the image), not a raw product cutout. When a
+// position has one, it replaces the generated icon+badge+name+facts
+// treatment entirely for that slide (rendering both would duplicate the
+// text). Add slide02.png/slide03.png the same way once they exist —
+// nothing else in this component needs to change.
+const HERO_SLIDE_IMAGES: Partial<Record<number, {src: string; width: number; height: number}>> = {
+  1: {src: "/images/hero/slide01.png", width: 864, height: 350},
+};
+
+// Rotates through the real Top 3 of the featured ranking (not decorative
+// stock slides) — arrows and dots are fully functional, not a static
+// carousel shell with dead controls. Full-width: no side text column
+// competing with the image, so the visual is the only thing in the hero
+// (the institutional headline/CTA now live in their own section right
+// below — see app/page.tsx). The nav buttons/dots are rendered as
+// *siblings* of the shell-constrained wrapper (not nested inside it)
+// specifically so they can be positioned against the full width of the
+// hero section, like a real full-bleed carousel.
+export function HeroCarousel({products}: {products: PublicProduct[]}) {
+  const [index, setIndex] = useState(0);
+  const slide = products[index];
+  const slideImage = slide ? HERO_SLIDE_IMAGES[slide.position] : undefined;
+  const prev = () => setIndex((i) => (i - 1 + products.length) % products.length);
+  const next = () => setIndex((i) => (i + 1) % products.length);
+  return (
+    <>
+      {slide && (
+        <div className="shell hero-grid-full">
+          {slideImage ? (
+            <div className="hero-banner" style={{aspectRatio: `${slideImage.width} / ${slideImage.height}`}}>
+              <Image src={slideImage.src} alt={`${slide.name} — ${slide.badge}`} fill sizes="100vw" priority className="hero-banner-image" />
+              {/* The banner graphic has its own decorative prev/next arrows and
+                  dots baked into the pixels; these patches hide them so only
+                  the real, functional controls rendered below are visible. */}
+              <span className="hero-banner-mask hero-banner-mask-left" aria-hidden="true" />
+              <span className="hero-banner-mask hero-banner-mask-right" aria-hidden="true" />
+              <span className="hero-banner-mask hero-banner-mask-dots" aria-hidden="true" />
+            </div>
+          ) : (
+            <div className="hero-visual">
+              <span className="hero-ghost" aria-hidden="true">{String(slide.position).padStart(2, "0")}</span>
+              <div className="hero-figure">
+                <span className="hero-badge">{slide.badge}</span>
+                <ProductMedia p={slide} priority className="hero-media" />
+                <p className="hero-name">{slide.name}</p>
+                <ul className="hero-facts">
+                  <li><IconType /> {slide.type}</li>
+                  <li><IconBattery /> {slide.battery}</li>
+                  <li><IconShield /> ANC {slide.anc}</li>
+                </ul>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {products.length > 1 && (
+        <>
+          <button type="button" className="hero-nav hero-nav-prev" onClick={prev} aria-label="Fone anterior">
+            <IconChevronLeft />
+          </button>
+          <button type="button" className="hero-nav hero-nav-next" onClick={next} aria-label="Próximo fone">
+            <IconChevronRight />
+          </button>
+          <div className="hero-dots" role="tablist" aria-label="Selecionar fone em destaque">
+            {products.map((p, i) => (
+              <button
+                key={p.id}
+                type="button"
+                role="tab"
+                className={`hero-dot${i === index ? " is-active" : ""}`}
+                aria-selected={i === index}
+                aria-label={`Ver ${p.name}`}
+                onClick={() => setIndex(i)}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+// ---------- Trust bar ----------
 
 // ---------- Ranking: rich card (Top 3 / curated picks) ----------
 
@@ -234,10 +315,15 @@ function RankRow({p, compare}: {p: PublicProduct; compare?: CompareState}) {
 
 // ---------- Catalog: filters + list + comparator ----------
 
-export function Catalog({products}: {products: PublicProduct[]}) {
+// `initialUse` seeds the "Uso" filter from a real query param
+// (?uso=trabalho, etc. — see app/melhores-fones-mercado-livre/page.tsx and
+// the home page's real, working use-case shortcuts) so a link promising
+// "fones para trabalhar" actually lands on that filtered view, instead of
+// just scrolling to the same unfiltered list every other link goes to.
+export function Catalog({products, initialUse}: {products: PublicProduct[]; initialUse?: string}) {
   const [type, setType] = useState("todos");
   const [anc, setAnc] = useState("todos");
-  const [use, setUse] = useState("todos");
+  const [use, setUse] = useState(initialUse ?? "todos");
   const [brand, setBrand] = useState("todos");
   const [selected, setSelected] = useState<string[]>([]);
   const filtered = useMemo(
@@ -348,36 +434,16 @@ function Comparator({items}: {items: PublicProduct[]}) {
   );
 }
 
-// ---------- Category bands ----------
+// ---------- Share ----------
 
-const CATEGORIES = [
-  {key: "academia", name: "Para academia", copy: "Leve, firme no ouvido e resistente ao suor.", Icon: IconDumbbell},
-  {key: "trabalho", name: "Para trabalhar", copy: "Conforto prolongado e chamadas mais claras.", Icon: IconBriefcase},
-  {key: "viagem", name: "Para viajar", copy: "Bateria longa e isolamento para trajetos.", Icon: IconPlane},
-  {key: "barato", name: "Melhor barato", copy: "Bom custo-benefício sem abrir mão do essencial.", Icon: IconTag},
-  {key: "anc", name: "Melhor ANC", copy: "Cancelamento de ruído mais consistente da lista.", Icon: IconShield},
-  {key: "premium", name: "Melhor premium", copy: "Acabamento e recursos de ponta para quem investe mais.", Icon: IconDiamond},
-] as const;
-
-export function CategoryBands() {
-  return (
-    <div className="category-bands" id="guias">
-      {CATEGORIES.map((c) => (
-        <Link key={c.key} className="category-band" href="/melhores-fones-mercado-livre#ranking">
-          <c.Icon className="category-icon" />
-          <span className="category-name">{c.name}</span>
-          <span className="category-copy">{c.copy}</span>
-          <IconArrowRight className="category-arrow" />
-        </Link>
-      ))}
-    </div>
-  );
-}
-
-// ---------- Share / Newsletter ----------
-
-export function Share() {
-  const url = typeof window === "undefined" ? site.url : window.location.href;
+// `url` is passed by the caller (a Server Component that already knows the
+// canonical path) rather than read from `window.location.href` — reading
+// `window` during render produces a different value on the server (where
+// `window` doesn't exist) than on the client's very first render, which is
+// a classic React hydration mismatch (confirmed via a real browser: the
+// server rendered site.url while the client immediately rendered
+// window.location.href, before hydration could reconcile them).
+export function Share({url}: {url: string}) {
   const [copied, setCopied] = useState(false);
   const share = async () => {
     if (navigator.share) await navigator.share({title: typeof document === "undefined" ? site.name : document.title, url});
@@ -390,26 +456,5 @@ export function Share() {
       <a className="cta alt" href={`https://t.me/share/url?url=${encodeURIComponent(url)}`} {...externalProps}>Telegram</a>
       <button className="cta alt" type="button" onClick={() => {navigator.clipboard.writeText(url); setCopied(true);}}>{copied ? "Link copiado" : "Copiar link"}</button>
     </div>
-  );
-}
-
-export function Newsletter() {
-  const [message, setMessage] = useState("");
-  return (
-    <section className="newsletter">
-      <WaveMotif className="newsletter-wave" />
-      <div className="shell newsletter-inner">
-        <p className="eyebrow">Fique por dentro</p>
-        <h2>Receba novos comparativos e alertas de ofertas</h2>
-        <p>Integração de e-mail ainda não configurada.</p>
-        <form onSubmit={(e) => {e.preventDefault(); setMessage("O formulário está pronto, mas o serviço de e-mail ainda precisa ser conectado.");}}>
-          <label>Nome (opcional)<input name="name" /></label>
-          <label>E-mail<input name="email" type="email" required /></label>
-          <label className="check"><input required type="checkbox" /> Concordo em receber comunicações conforme a Política de Privacidade.</label>
-          <button className="cta" type="submit">Quero receber</button>
-          {message && <p role="status">{message}</p>}
-        </form>
-      </div>
-    </section>
   );
 }

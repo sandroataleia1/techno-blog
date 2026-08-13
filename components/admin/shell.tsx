@@ -3,7 +3,7 @@ import Link from "next/link";
 import type {ReactNode} from "react";
 import {usePathname} from "next/navigation";
 import {LogoMark, Wordmark} from "@/components/brand";
-import {IconArchive, IconBox, IconExternal, IconGrid, IconHome, IconLink, IconList, IconPodium, IconTag} from "@/components/icons";
+import {IconArchive, IconBox, IconExternal, IconGrid, IconHome, IconLayout, IconLink, IconList, IconPodium, IconTag} from "@/components/icons";
 
 const NAV = [
   {group: "Catálogo", items: [
@@ -17,6 +17,7 @@ const NAV = [
   ]},
   {group: "Conteúdo", items: [
     {href: "/admin/rankings", label: "Rankings", Icon: IconPodium, exact: false},
+    {href: "/admin/blocos", label: "Blocos da home", Icon: IconLayout, exact: false},
   ]},
   {group: "Sistema", items: [
     {href: "/admin/backup", label: "Backups", Icon: IconArchive, exact: false},

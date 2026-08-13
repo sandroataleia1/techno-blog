@@ -14,7 +14,7 @@ import {
   validateEditorialForPublish,
   validateItemsForPublish,
 } from '../lib/rankings-rules.ts';
-import {sameOrigin} from '../lib/admin.ts';
+import {originAllowed} from '../lib/admin.ts';
 import {translateRankingError, validateRankingBody} from '../app/api/admin/rankings/route.ts';
 
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
@@ -96,15 +96,20 @@ test('estados aceitos: apenas draft, published, archived', () => {
   assert.deepEqual([...RANKING_STATUSES], ['draft', 'published', 'archived']);
 });
 
-// ---------- Behavioral: CSRF Origin check (real logic — sameOrigin is pure) ----------
+// ---------- Behavioral: CSRF Origin check (real logic — originAllowed is pure) ----------
+// Deep coverage of the allowlist parser/matcher itself lives in
+// tests/admin-origins.test.mjs; this is a smoke test that requireAdminMutation's
+// actual dependency (originAllowed, imported from lib/admin.ts) behaves as
+// expected against a real ADMIN_ALLOWED_ORIGINS-shaped env.
 
-test('CSRF: sameOrigin aceita requisição same-origin e sem header Origin, rejeita origin cruzado', () => {
-  const sameOriginReq = new Request('http://localhost:3001/api/admin/rankings', {headers: {origin: 'http://localhost:3001'}}, );
+test('CSRF: originAllowed aceita origin configurada, rejeita origin cruzada e origin ausente', () => {
+  const env = {ADMIN_ALLOWED_ORIGINS: 'http://localhost:3001'};
+  const allowedReq = new Request('http://localhost:3001/api/admin/rankings', {headers: {origin: 'http://localhost:3001'}});
   const noOriginReq = new Request('http://localhost:3001/api/admin/rankings');
   const crossOriginReq = new Request('http://localhost:3001/api/admin/rankings', {headers: {origin: 'https://evil.example'}});
-  assert.equal(sameOrigin(sameOriginReq), true);
-  assert.equal(sameOrigin(noOriginReq), true);
-  assert.equal(sameOrigin(crossOriginReq), false);
+  assert.equal(originAllowed(allowedReq, env), true);
+  assert.equal(originAllowed(noOriginReq, env), false);
+  assert.equal(originAllowed(crossOriginReq, env), false);
 });
 
 // ---------- Behavioral: centralized error translation (real logic — translateRankingError/validateRankingBody are pure) ----------

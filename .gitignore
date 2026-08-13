@@ -11,3 +11,5 @@ data/uploads
 *.temp
 *.log
 tsconfig.tsbuildinfo
+Thumbs.db
+.DS_Store
